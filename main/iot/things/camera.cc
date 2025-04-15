@@ -53,5 +53,3 @@ public:
 };
 
 } // namespace iot 
-
-DECLARE_THING(Camera);
