@@ -11,8 +11,10 @@ namespace iot {
 static std::map<std::string, std::function<Thing*()>>* thing_creators = nullptr;
 
 void RegisterThing(const std::string& type, std::function<Thing*()> creator) {
+    ESP_LOGI(TAG, "Registering thing: %s", type.c_str());
     if (thing_creators == nullptr) {
         thing_creators = new std::map<std::string, std::function<Thing*()>>();
+        ESP_LOGI(TAG, "Registered thing: %s", type.c_str());
     }
     (*thing_creators)[type] = creator;
 }

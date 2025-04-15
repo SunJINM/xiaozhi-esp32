@@ -390,6 +390,7 @@ void Application::Start() {
         });
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
+        ESP_LOGI(TAG, "Received JSON: %s", cJSON_Print(root));
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
         if (strcmp(type->valuestring, "tts") == 0) {
@@ -428,6 +429,13 @@ void Application::Start() {
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
                 });
+                auto& thing_manager = iot::ThingManager::GetInstance();
+                cJSON* command = cJSON_CreateObject();
+                cJSON_AddStringToObject(command, "name", "Camera");
+                cJSON_AddStringToObject(command, "method", "take_photo");
+                ESP_LOGI(TAG, "Invoking camera take_photo command: %s", cJSON_Print(command));
+                thing_manager.Invoke(command);
+                cJSON_Delete(command);
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
@@ -438,6 +446,7 @@ void Application::Start() {
             }
         } else if (strcmp(type->valuestring, "iot") == 0) {
             auto commands = cJSON_GetObjectItem(root, "commands");
+            ESP_LOGI(TAG, "Received IoT commands: %s", cJSON_Print(commands));
             if (commands != NULL) {
                 auto& thing_manager = iot::ThingManager::GetInstance();
                 for (int i = 0; i < cJSON_GetArraySize(commands); ++i) {

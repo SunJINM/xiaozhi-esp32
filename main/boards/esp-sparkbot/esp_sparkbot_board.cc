@@ -47,7 +47,7 @@ private:
     Display* display_;
 
     void InitializeI2c() {
-        // Initialize I2C peripheral
+        // Initialize I2C peripheral for audio
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = I2C_NUM_0,
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
@@ -128,6 +128,7 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker"));
         thing_manager.AddThing(iot::CreateThing("Screen"));
         thing_manager.AddThing(iot::CreateThing("Chassis"));
+        thing_manager.AddThing(iot::CreateThing("Camera"));
     }
 
 public:

@@ -8,6 +8,7 @@ namespace iot {
 
 void ThingManager::AddThing(Thing* thing) {
     things_.push_back(thing);
+    ESP_LOGI(TAG, "Added thing: %s", thing->name().c_str());
 }
 
 std::string ThingManager::GetDescriptorsJson() {
@@ -52,7 +53,9 @@ bool ThingManager::GetStatesJson(std::string& json, bool delta) {
 
 void ThingManager::Invoke(const cJSON* command) {
     auto name = cJSON_GetObjectItem(command, "name");
+    ESP_LOGI(TAG, "Invoking command name: %s", cJSON_Print(name));
     for (auto& thing : things_) {
+        ESP_LOGI(TAG, "Thing name: %s", thing->name().c_str());
         if (thing->name() == name->valuestring) {
             thing->Invoke(command);
             return;
