@@ -174,6 +174,32 @@ void Display::UpdateStatusBar(bool update_all) {
     esp_pm_lock_release(pm_lock_);
 }
 
+void Display::ShowQrCode(const char* data, lv_obj_t* parent) {
+    DisplayLockGuard lock(this);
+    if (!parent) {
+        parent = lv_scr_act();
+    }
+
+    // 先删除旧的二维码（如果存在）
+    if (qr_code_) {
+        lv_obj_del(qr_code_);
+        qr_code_ = nullptr;
+    }
+
+    qr_code_ = lv_qrcode_create(parent);
+    lv_obj_set_size(qr_code_, width_ * 0.8, width_ * 0.8); // 设置二维码大小为屏幕宽度的80%
+    lv_qrcode_update(qr_code_, data, strlen(data));
+    lv_obj_align(qr_code_, LV_ALIGN_CENTER, 0, 0); // 居中显示
+}
+
+void Display::ClearQrCode() {
+    DisplayLockGuard lock(this);
+    if (qr_code_) {
+        lv_obj_del(qr_code_);
+        qr_code_ = nullptr;
+    }
+}
+
 
 void Display::SetEmotion(const char* emotion) {
     struct Emotion {

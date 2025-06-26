@@ -29,6 +29,8 @@ public:
     virtual void SetTheme(const std::string& theme_name);
     virtual std::string GetTheme() { return current_theme_name_; }
     virtual void UpdateStatusBar(bool update_all = false);
+    virtual void ShowQrCode(const char* data, lv_obj_t* parent = nullptr);
+    virtual void ClearQrCode();
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }
@@ -49,6 +51,7 @@ protected:
     lv_obj_t* chat_message_label_ = nullptr;
     lv_obj_t* low_battery_popup_ = nullptr;
     lv_obj_t* low_battery_label_ = nullptr;
+    lv_obj_t* qr_code_ = nullptr;
     
     const char* battery_icon_ = nullptr;
     const char* network_icon_ = nullptr;
