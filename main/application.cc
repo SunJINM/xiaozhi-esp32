@@ -426,6 +426,7 @@ void Application::Start() {
         reference_resampler_.Configure(codec->input_sample_rate(), 16000);
     }
     codec->Start();
+    // codec->SetOutputVolume(0);
 
 #if CONFIG_USE_AUDIO_PROCESSOR
     xTaskCreatePinnedToCore([](void* arg) {
@@ -708,6 +709,19 @@ void Application::Start() {
         // Play the success sound to indicate the device is ready
         ResetDecoder();
         PlaySound(Lang::Sounds::P3_SUCCESS);
+        
+        // Schedule([this]() {
+        //     vTaskDelay(pdMS_TO_TICKS(3000));
+        //     if (device_state_ == kDeviceStateIdle && protocol_) {
+        //         ESP_LOGI(TAG, "Auto wake up triggered");
+        //         if (!protocol_->IsAudioChannelOpened()) {
+        //             SetDeviceState(kDeviceStateConnecting);
+        //             if (protocol_->OpenAudioChannel()) {
+        //                 SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        //             }
+        //         }
+        //     }
+        // });
     }
 
     // Print heap stats
