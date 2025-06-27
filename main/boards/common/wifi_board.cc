@@ -208,6 +208,8 @@ void WifiBoard::EnterWifiConfigMode() {
     ret = esp_blufi_host_and_cb_init(&blufi_callbacks);
     if (ret) {
         ESP_LOGE(TAG, "%s BluFi host and callback init failed: %s", __func__, esp_err_to_name(ret));
+        esp_bt_controller_disable();
+        esp_bt_controller_deinit();
         return;
     }
 
@@ -303,13 +305,14 @@ void WifiBoard::EnterWifiConfigMode() {
         } else if (bits & FAILED_BIT) {
             ESP_LOGE(TAG, "BluFi configuration timed out or failed.");
             // Send failure custom data
-            char *json_str_fail = "wifi connect fail";
+            const char *json_str_fail = "wifi connect fail";
             esp_blufi_send_custom_data((uint8_t*)json_str_fail, strlen(json_str_fail));
         }
     }
 }
 
 void WifiBoard::StartNetwork() {
+    wifi_config_mode_ = true;
     // User can press BOOT button while starting to enter WiFi configuration mode
     if (wifi_config_mode_) {
         EnterWifiConfigMode();
