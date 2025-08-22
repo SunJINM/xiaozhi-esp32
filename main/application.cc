@@ -503,6 +503,7 @@ void Application::Start() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     }
+    display->ShowJpegImage(14);
 
     // Print heap stats
     SystemInfo::PrintHeapStats();

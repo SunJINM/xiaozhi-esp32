@@ -5,8 +5,9 @@
 #include <functional>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
-#include "mmap_generate_emoji_normal.h"
+#include "mmap_generate_assets.h"
 #include "gfx.h"
+#include "widget/gfx_img.h"
 
 namespace anim {
 
@@ -31,6 +32,10 @@ public:
     
     void SetIcon(int asset_id);
     mmap_assets_handle_t GetAssetsHandle() const { return assets_handle_; }
+    
+    
+    // Get GFX handle for animation creation
+    gfx_handle_t GetGfxHandle() const { return engine_handle_; }
 
     // Callback functions (public to be accessible from static helper functions)
     static bool OnFlushIoReady(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx);
@@ -39,6 +44,7 @@ public:
 private:
     gfx_handle_t engine_handle_;
     mmap_assets_handle_t assets_handle_;
+    esp_lcd_panel_handle_t panel_handle_;  // Store for direct LCD access
 };
 
 class EmoteDisplay : public Display {
@@ -49,6 +55,11 @@ public:
     virtual void SetEmotion(const char* emotion) override;
     virtual void SetStatus(const char* status) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
+    
+    void ShowPicture(int asset_id);  // AAF format using GFX
+    void ShowImageBin(int asset_id);  // .bin image format using GFX
+    void ShowJpegImage(int asset_id);  // .jpg image format using GFX
+    void HidePicture();
     
     anim::EmoteEngine* GetEngine()
     {
@@ -61,6 +72,9 @@ private:
     virtual void Unlock() override;
 
     std::unique_ptr<anim::EmoteEngine> engine_;
+    gfx_obj_t* fullscreen_anim_ = nullptr;  // Store reference for cleanup
+    gfx_jpeg_dsc_t jpeg_img_dsc_;  // JPEG image descriptor
+    
 };
 
 } // namespace anim

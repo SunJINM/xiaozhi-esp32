@@ -255,6 +255,18 @@ void Display::SetPreviewImage(const lv_img_dsc_t* image) {
     // Do nothing
 }
 
+void Display::ShowPicture(const int asset_id) {
+    // Do nothing
+}
+
+void Display::ShowImageBin(const int asset_id) {
+    // Do nothing
+}
+
+void Display::ShowJpegImage(const int asset_id) {
+    // Do nothing
+}
+
 void Display::SetChatMessage(const char* role, const char* content) {
     DisplayLockGuard lock(this);
     if (chat_message_label_ == nullptr) {
