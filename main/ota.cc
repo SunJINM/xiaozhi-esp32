@@ -18,8 +18,48 @@
 #include <vector>
 #include <sstream>
 #include <algorithm>
+#include <lwip/netdb.h>
+#include <lwip/sockets.h>
 
 #define TAG "Ota"
+
+std::string ResolveHostnameToIP(const std::string& url) {
+    // Parse hostname from URL
+    size_t protocol_end = url.find("://");
+    if (protocol_end == std::string::npos) {
+        return "";
+    }
+    
+    size_t host_start = protocol_end + 3;
+    size_t path_start = url.find("/", host_start);
+    size_t port_start = url.find(":", host_start);
+    
+    std::string hostname;
+    if (path_start == std::string::npos) {
+        if (port_start != std::string::npos) {
+            hostname = url.substr(host_start, port_start - host_start);
+        } else {
+            hostname = url.substr(host_start);
+        }
+    } else {
+        if (port_start != std::string::npos && port_start < path_start) {
+            hostname = url.substr(host_start, port_start - host_start);
+        } else {
+            hostname = url.substr(host_start, path_start - host_start);
+        }
+    }
+    
+    // Resolve hostname to IP
+    struct hostent *he = gethostbyname(hostname.c_str());
+    if (he == nullptr) {
+        ESP_LOGE(TAG, "Failed to resolve hostname: %s", hostname.c_str());
+        return "";
+    }
+    
+    struct in_addr addr;
+    addr.s_addr = *((unsigned long *)he->h_addr);
+    return std::string(inet_ntoa(addr));
+}
 
 
 Ota::Ota() {
@@ -85,6 +125,14 @@ bool Ota::CheckVersion() {
         return false;
     }
 
+    // Resolve and print IP address
+    std::string ip_addr = ResolveHostnameToIP(url);
+    if (!ip_addr.empty()) {
+        ESP_LOGI(TAG, "OTA check version request URL: %s -> IP: %s", url.c_str(), ip_addr.c_str());
+    } else {
+        ESP_LOGI(TAG, "OTA check version request URL: %s (IP resolution failed)", url.c_str());
+    }
+
     auto http = SetupHttp();
 
     std::string data = board.GetJson();
@@ -108,7 +156,6 @@ bool Ota::CheckVersion() {
     // Response: { "firmware": { "version": "1.0.0", "url": "http://" } }
     // Parse the JSON response and check if the version is newer
     // If it is, set has_new_version_ to true and store the new version and URL
-    
     cJSON *root = cJSON_Parse(data.c_str());
     if (root == NULL) {
         ESP_LOGE(TAG, "Failed to parse JSON response");
@@ -262,6 +309,15 @@ void Ota::MarkCurrentVersionValid() {
 
 bool Ota::Upgrade(const std::string& firmware_url) {
     ESP_LOGI(TAG, "Upgrading firmware from %s", firmware_url.c_str());
+    
+    // Resolve and print IP address
+    std::string ip_addr = ResolveHostnameToIP(firmware_url);
+    if (!ip_addr.empty()) {
+        ESP_LOGI(TAG, "OTA firmware download URL: %s -> IP: %s", firmware_url.c_str(), ip_addr.c_str());
+    } else {
+        ESP_LOGI(TAG, "OTA firmware download URL: %s (IP resolution failed)", firmware_url.c_str());
+    }
+    
     esp_ota_handle_t update_handle = 0;
     auto update_partition = esp_ota_get_next_update_partition(NULL);
     if (update_partition == NULL) {
