@@ -58,7 +58,6 @@ public:
     
     void ShowPicture(int asset_id);  // AAF format using GFX
     void ShowImageBin(int asset_id);  // .bin image format using GFX
-    void ShowJpegImage(int asset_id);  // .jpg image format using GFX
     void HidePicture();
     
     anim::EmoteEngine* GetEngine()
@@ -73,7 +72,6 @@ private:
 
     std::unique_ptr<anim::EmoteEngine> engine_;
     gfx_obj_t* fullscreen_anim_ = nullptr;  // Store reference for cleanup
-    gfx_jpeg_dsc_t jpeg_img_dsc_;  // JPEG image descriptor
     
 };
 
