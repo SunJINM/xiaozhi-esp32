@@ -463,14 +463,14 @@ config USE_CUSTOM_WAKE_WORD
         
 config CUSTOM_WAKE_WORD
     string "Custom Wake Word"
-    default "xiao tu dou"
+    default "ni hao xiao yue"
     depends on USE_CUSTOM_WAKE_WORD
     help
         自定义唤醒词，中文用拼音表示，每个字之间用空格隔开
 
 config CUSTOM_WAKE_WORD_DISPLAY
     string "Custom Wake Word Display"
-    default "小土豆"
+    default "你好小阅"
     depends on USE_CUSTOM_WAKE_WORD
     help
         唤醒后发送给服务器的问候语 
