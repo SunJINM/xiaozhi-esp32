@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:docs.espressif.com)"
+      "WebFetch(domain:docs.espressif.com)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\partitions\\v1/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\boards\\echoear/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\boards\\echoear/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\boards\\echoear/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\boards\\echoear/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio\\codecs/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio\\codecs/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio\\codecs/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio\\codecs/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio\\codecs/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio/**)",
+      "Read(/D:\\WorkProjects\\xiaozhi\\xiaozhi-esp32\\main\\audio/**)"
     ],
     "deny": [],
     "ask": []
