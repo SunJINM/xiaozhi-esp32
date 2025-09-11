@@ -572,6 +572,9 @@ void Application::Start() {
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        audio_service_.PlaySound(Lang::Sounds::OGG_GUIDE);
     }
 }
 
