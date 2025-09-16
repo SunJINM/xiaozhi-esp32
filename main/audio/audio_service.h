@@ -11,7 +11,6 @@
 #include <freertos/task.h>
 #include <freertos/event_groups.h>
 #include <esp_timer.h>
-#include <model_path.h>
 
 #include <opus_encoder.h>
 #include <opus_decoder.h>
@@ -43,7 +42,7 @@
 #define AUDIO_TESTING_MAX_DURATION_MS 10000
 #define MAX_TIMESTAMPS_IN_QUEUE 3
 
-#define AUDIO_POWER_TIMEOUT_MS 600000
+#define AUDIO_POWER_TIMEOUT_MS 15000
 #define AUDIO_POWER_CHECK_INTERVAL_MS 1000
 
 
@@ -107,7 +106,6 @@ public:
     void PlaySound(const std::string_view& sound);
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
-    void SetModelsList(srmodel_list_t* models_list);
 
 private:
     AudioCodec* codec_ = nullptr;
@@ -121,7 +119,6 @@ private:
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
     DebugStatistics debug_statistics_;
-    srmodel_list_t* models_list_ = nullptr;
 
     EventGroupHandle_t event_group_;
 

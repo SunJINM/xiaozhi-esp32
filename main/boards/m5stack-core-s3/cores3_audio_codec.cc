@@ -4,6 +4,7 @@
 #include <driver/i2c_master.h>
 #include <driver/i2s_tdm.h>
 
+
 #define TAG "CoreS3AudioCodec"
 
 CoreS3AudioCodec::CoreS3AudioCodec(void* i2c_master_handle, int input_sample_rate, int output_sample_rate,

@@ -1,13 +1,6 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
-#include "emoji_collection.h"
-
-#ifdef LVGL_VERSION_MAJOR
-#define HAVE_LVGL 1
-#include <lvgl.h>
-#endif
-
 #include <esp_timer.h>
 #include <esp_log.h>
 #include <esp_pm.h>
@@ -15,14 +8,11 @@
 #include <string>
 #include <chrono>
 
-class Theme {
-public:
-    Theme(const std::string& name) : name_(name) {}
-    virtual ~Theme() = default;
-
-    inline std::string name() const { return name_; }
-private:
-    std::string name_;
+struct DisplayFonts {
+    const void* text_font = nullptr;
+    const void* icon_font = nullptr;
+    const void* emoji_font = nullptr;
+    const void* basic_font = nullptr;
 };
 
 class Display {
@@ -32,11 +22,12 @@ public:
 
     virtual void SetStatus(const char* status);
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
-    virtual void ShowNotification(const std::string &notification, int duration_ms = 3000);
     virtual void SetEmotion(const char* emotion);
     virtual void SetChatMessage(const char* role, const char* content);
-    virtual void SetTheme(Theme* theme);
-    virtual Theme* GetTheme() { return current_theme_; }
+    virtual void SetIcon(const char* icon);
+    virtual void SetPreviewImage(const void* image);
+    virtual void SetTheme(const std::string& theme_name);
+    virtual std::string GetTheme() { return current_theme_name_; }
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
 
@@ -46,10 +37,15 @@ public:
 protected:
     int width_ = 0;
     int height_ = 0;
+    
+    esp_pm_lock_handle_t pm_lock_ = nullptr;
+    
+    std::string current_theme_name_;
 
-    Theme* current_theme_ = nullptr;
+    std::chrono::system_clock::time_point last_status_update_time_;
 
     friend class DisplayLockGuard;
+
     virtual bool Lock(int timeout_ms = 0) = 0;
     virtual void Unlock() = 0;
 };

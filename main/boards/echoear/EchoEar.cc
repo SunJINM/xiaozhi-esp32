@@ -6,7 +6,6 @@
 #include "config.h"
 #include "backlight.h"
 #include "emote_display.h"
-#include "settings.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
@@ -20,16 +19,90 @@
 #include "esp_lcd_touch_cst816s.h"
 #include "touch.h"
 
+#if CONFIG_USE_EMOTE_STYLE
+#include "mmap_generate_emoji_large.h"
+#endif
 #include "driver/temperature_sensor.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
+
 #define TAG "EchoEar"
 
-#define USE_LVGL_DEFAULT    0
-
+#if CONFIG_USE_EMOTE_STYLE
+LV_FONT_DECLARE(font_puhui_basic_30_4);
+#else
+LV_FONT_DECLARE(font_awesome_20_4);
+#endif
+LV_FONT_DECLARE(font_puhui_20_4);
 temperature_sensor_handle_t temp_sensor = NULL;
+
+#if CONFIG_USE_EMOTE_STYLE
+static const anim::EmoteDisplayConfig kEmoteConfig = {
+    .emotion_map = {
+        {"happy",       {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"laughing",    {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"funny",       {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"loving",      {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"embarrassed", {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"confident",   {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"delicious",   {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"sad",         {MMAP_EMOJI_LARGE_SAD_EAF,      true,  20}},
+        {"crying",      {MMAP_EMOJI_LARGE_CRY_EAF,      true,  20}},
+        {"sleepy",      {MMAP_EMOJI_LARGE_SLEEP_EAF,    true,  20}},
+        {"silly",       {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"angry",       {MMAP_EMOJI_LARGE_ANGRY_EAF,    true,  20}},
+        {"surprised",   {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"shocked",     {MMAP_EMOJI_LARGE_SHOCKED_EAF,  true,  20}},
+        {"thinking",    {MMAP_EMOJI_LARGE_CONFUSED_EAF, true,  20}},
+        {"winking",     {MMAP_EMOJI_LARGE_NEUTRAL_EAF,  true,  20}},
+        {"relaxed",     {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
+        {"confused",    {MMAP_EMOJI_LARGE_CONFUSED_EAF, true,  20}},
+        {"neutral",     {MMAP_EMOJI_LARGE_WINKING_EAF,  false, 20}},
+        {"idle",        {MMAP_EMOJI_LARGE_NEUTRAL_EAF,  false, 20}},
+        {"listen",      {MMAP_EMOJI_LARGE_LISTEN_EAF,   true,  20}}, // 添加监听动画
+    },
+    .icon_map = {
+        {"wifi",     MMAP_EMOJI_LARGE_ICON_WIFI_BIN},
+        {"battery",  MMAP_EMOJI_LARGE_ICON_BATTERY_BIN},
+        {"mic",      MMAP_EMOJI_LARGE_ICON_MIC_BIN},
+        {"speaker",  MMAP_EMOJI_LARGE_ICON_SPEAKER_ZZZ_BIN},
+        {"error",    MMAP_EMOJI_LARGE_ICON_WIFI_FAILED_BIN},
+    },
+    .layout = {
+        .eye_anim = {
+            .align = GFX_ALIGN_LEFT_MID,
+            .x = 10,
+            .y = 10
+        },
+        .status_icon = {
+            .align = GFX_ALIGN_TOP_MID,
+            .x = -100,
+            .y = 38
+        },
+        .toast_label = {
+            .align = GFX_ALIGN_TOP_MID,
+            .x = 0,
+            .y = 40,
+            .width = 160,
+            .height = 40
+        },
+        .clock_label = {
+            .align = GFX_ALIGN_TOP_MID,
+            .x = 0,
+            .y = 35,
+            .width = 160,
+            .height = 50
+        },
+        .listen_anim = {
+            .align = GFX_ALIGN_TOP_MID,
+            .x = 0,
+            .y = 25
+        }
+    },
+};
+#endif
 static const st77916_lcd_init_cmd_t vendor_specific_init_yysj[] = {
     {0xF0, (uint8_t []){0x28}, 1, 0},
     {0xF2, (uint8_t []){0x28}, 1, 0},
@@ -388,10 +461,11 @@ private:
     Cst816s* cst816s_;
     Charge* charge_;
     Button boot_button_;
-#if USE_LVGL_DEFAULT
-    LcdDisplay* display_;
-#else
+#if CONFIG_USE_EMOTE_STYLE
     anim::EmoteDisplay* display_ = nullptr;
+    mmap_assets_handle_t assets_handle_ = nullptr;
+#else
+    LcdDisplay* display_;
 #endif
     PwmBacklight* backlight_ = nullptr;
     esp_timer_handle_t touchpad_timer_;
@@ -420,45 +494,8 @@ private:
     }
     uint8_t DetectPcbVersion()
     {
-        esp_reset_reason_t reset_reason = esp_reset_reason();
-        uint8_t pcb_verison = 0;
-        Settings settings("board", true);
-
-        // 如果是软件重启，尝试从NVS读取之前保存的版本
-        if (reset_reason != ESP_RST_POWERON) {
-            int saved_version = settings.GetInt("pcb_version", -1);
-            if (saved_version >= 0) {
-                pcb_verison = static_cast<uint8_t>(saved_version);
-                ESP_LOGI(TAG, "Software restart detected, using saved PCB version V1.2");
-                
-                // 对于V1.2版本，重新初始化GPIO和引脚配置
-                if (pcb_verison == 1) {
-                    // 配置音频编解码器电源控制引脚
-                    gpio_config_t gpio_conf = {
-                        .pin_bit_mask = (1ULL << GPIO_NUM_48),
-                        .mode = GPIO_MODE_OUTPUT,
-                        .pull_up_en = GPIO_PULLUP_DISABLE,
-                        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-                        .intr_type = GPIO_INTR_DISABLE
-                    };
-                    ESP_ERROR_CHECK(gpio_config(&gpio_conf));
-                    ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_48, 1));
-                    
-                    // 设置V1.2版本的引脚映射
-                    AUDIO_I2S_GPIO_DIN = AUDIO_I2S_GPIO_DIN_2;
-                    AUDIO_CODEC_PA_PIN = AUDIO_CODEC_PA_PIN_2;
-                    QSPI_PIN_NUM_LCD_RST = QSPI_PIN_NUM_LCD_RST_2;
-                    TOUCH_PAD2 = TOUCH_PAD2_2;
-                    UART1_TX = UART1_TX_2;
-                    UART1_RX = UART1_RX_2;
-                }
-                return pcb_verison;
-            }
-        }
-        
-        // 冷启动或NVS中没有保存的版本，执行完整的硬件检测
-        ESP_LOGI(TAG, "Power-on reset or no saved version, performing hardware detection");
         esp_err_t ret = i2c_master_probe(i2c_bus_, 0x18, 100);
+        uint8_t pcb_verison = 0;
         if (ret == ESP_OK) {
             ESP_LOGI(TAG, "PCB verison V1.0");
             pcb_verison = 0;
@@ -488,10 +525,6 @@ private:
 
             }
         }
-        
-        // 将检测到的版本保存到NVS，供下次软件重启时使用
-        settings.SetInt("pcb_version", pcb_verison);
-        
         return pcb_verison;
     }
 
@@ -514,20 +547,19 @@ private:
 
         while (true) {
             if (touchpad->WaitForTouchEvent()) {
-                auto &app = Application::GetInstance();
-                auto &board = (EspS3Cat &)Board::GetInstance();
-
-                ESP_LOGI(TAG, "Touch event, TP_PIN_NUM_INT: %d", gpio_get_level(TP_PIN_NUM_INT));
                 touchpad->UpdateTouchPoint();
                 auto touch_event = touchpad->CheckTouchEvent();
 
                 if (touch_event == Cst816s::TOUCH_RELEASE) {
+                    auto &app = Application::GetInstance();
+                    auto &board = (EspS3Cat &)Board::GetInstance();
+                    
                     if (app.GetDeviceState() == kDeviceStateStarting &&
                             !WifiStation::GetInstance().IsConnected()) {
-                        board.ResetWifiConfiguration();
+                            board.ResetWifiConfiguration();
                     } else {
-                        app.ToggleChatState();
-                    }
+                            app.ToggleChatState();
+                        }
                 }
             }
         }
@@ -548,7 +580,6 @@ private:
         const gpio_config_t int_gpio_config = {
             .pin_bit_mask = (1ULL << TP_PIN_NUM_INT),
             .mode = GPIO_MODE_INPUT,
-            // .intr_type = GPIO_INTR_NEGEDGE
             .intr_type = GPIO_INTR_ANYEDGE
         };
         gpio_config(&int_gpio_config);
@@ -566,6 +597,22 @@ private:
                                                                                   QSPI_PIN_NUM_LCD_DATA3,
                                                                                   QSPI_LCD_H_RES * 80 * sizeof(uint16_t));
         ESP_ERROR_CHECK(spi_bus_initialize(QSPI_LCD_HOST, &bus_config, SPI_DMA_CH_AUTO));
+    }
+
+    void InitializeAssets() 
+    {
+#if CONFIG_USE_EMOTE_STYLE
+        ESP_LOGI(TAG, "Initializing assets for EmoteDisplay");
+        // Initialize assets for EmoteDisplay
+        const mmap_assets_config_t assets_cfg = {
+            .partition_label = "assets",
+            .max_files = MMAP_EMOJI_LARGE_FILES,
+            .checksum = MMAP_EMOJI_LARGE_CHECKSUM,
+            .flags = {.mmap_enable = true, .full_check = true}
+        };
+        ESP_ERROR_CHECK(mmap_assets_new(&assets_cfg, &assets_handle_));
+        ESP_LOGI(TAG, "Assets initialized successfully");
+#endif
     }
 
     void Initializest77916Display(uint8_t pcb_verison)
@@ -600,11 +647,19 @@ private:
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
 
-#if USE_LVGL_DEFAULT
-        display_ = new SpiLcdDisplay(panel_io, panel,
-            DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+#if CONFIG_USE_EMOTE_STYLE
+        ESP_LOGI(TAG, "Initializing EmoteDisplay, assets_handle: %p", assets_handle_);
+        display_ = new anim::SPIEmoteDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT, {
+                    .text_font = &font_puhui_20_4,
+                    .basic_font = &font_puhui_basic_30_4,
+                }, assets_handle_, kEmoteConfig);
 #else
-        display_ = new anim::EmoteDisplay(panel, panel_io);
+        display_ = new SpiLcdDisplay(panel_io, panel,
+        DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, {
+            .text_font = &font_puhui_20_4,
+            .icon_font = &font_awesome_20_4,
+            .emoji_font = font_emoji_64_init(),
+        });
 #endif
         backlight_ = new PwmBacklight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         backlight_->RestoreBrightness();
@@ -639,8 +694,19 @@ public:
         InitializeCst816sTouchPad();
 
         InitializeSpi();
+        InitializeAssets();
         Initializest77916Display(pcb_verison);
         InitializeButtons();
+    }
+
+    virtual ~EspS3Cat()
+    {
+#if CONFIG_USE_EMOTE_STYLE
+        if (assets_handle_) {
+            mmap_assets_del(assets_handle_);
+            assets_handle_ = nullptr;
+        }
+#endif
     }
 
     virtual AudioCodec* GetAudioCodec() override
@@ -675,6 +741,7 @@ public:
     {
         return backlight_;
     }
+
 };
 
 DECLARE_BOARD(EspS3Cat);

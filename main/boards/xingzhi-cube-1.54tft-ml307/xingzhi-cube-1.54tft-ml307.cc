@@ -19,6 +19,10 @@
 
 #define TAG "XINGZHI_CUBE_1_54TFT_ML307"
 
+LV_FONT_DECLARE(font_puhui_20_4);
+LV_FONT_DECLARE(font_awesome_20_4);
+
+
 class XINGZHI_CUBE_1_54TFT_ML307 : public DualNetworkBoard {
 private:
     Button boot_button_;
@@ -157,7 +161,16 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
 
         display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, 
+        {
+            .text_font = &font_puhui_20_4,
+            .icon_font = &font_awesome_20_4,
+#if CONFIG_USE_WECHAT_MESSAGE_STYLE
+            .emoji_font = font_emoji_32_init(),
+#else
+            .emoji_font = font_emoji_64_init(),
+#endif
+        });
     }
 
 public:
