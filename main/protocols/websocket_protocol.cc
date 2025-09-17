@@ -151,6 +151,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
             if (cJSON_IsString(type)) {
                 if (strcmp(type->valuestring, "hello") == 0) {
                     ParseServerHello(root);
+                    // xTaskCreate([](void* param) {
+                    //     Application::GetInstance().PlaySound(Lang::Sounds::OGG_START_WELCOME);
+                    //     vTaskDelete(nullptr);
+                    // }, "PlaySound", 2048, nullptr, 5, nullptr);
                 } else {
                     if (on_incoming_json_ != nullptr) {
                         on_incoming_json_(root);
