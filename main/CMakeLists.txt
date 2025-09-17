@@ -350,8 +350,44 @@ endforeach()
 
 if(CONFIG_BOARD_TYPE_ESP_HI)
     set(SPIFFS_DIR "${EMOTE_GFX_COMPONENT_PATH}/emoji_small")
-else()  
+else()
     set(SPIFFS_DIR "${EMOTE_GFX_COMPONENT_PATH}/emoji_large")
+endif()
+
+# 对于echoear板型，检查是否有自定义emotions文件
+if(CONFIG_BOARD_TYPE_ECHOEAR)
+    set(CUSTOM_EMOTIONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/boards/echoear/custom_emotions")
+
+    # 检查custom_emotions目录是否存在且有文件
+    file(GLOB CUSTOM_EAF_FILES "${CUSTOM_EMOTIONS_DIR}/*.eaf")
+    file(GLOB CUSTOM_BIN_FILES "${CUSTOM_EMOTIONS_DIR}/*.bin")
+
+    if(CUSTOM_EAF_FILES OR CUSTOM_BIN_FILES)
+        # 创建临时目录来合并文件，保持原目录名以确保变量名一致
+        set(MERGED_SPIFFS_DIR "${CMAKE_BINARY_DIR}/emoji_large")
+        file(MAKE_DIRECTORY ${MERGED_SPIFFS_DIR})
+
+        # 首先复制esp_emote_gfx中的所有文件
+        file(GLOB ORIGINAL_FILES "${SPIFFS_DIR}/*")
+        foreach(FILE ${ORIGINAL_FILES})
+            get_filename_component(FILENAME ${FILE} NAME)
+            configure_file(${FILE} ${MERGED_SPIFFS_DIR}/${FILENAME} COPYONLY)
+        endforeach()
+
+        # 然后复制custom_emotions中的文件，覆盖同名文件
+        foreach(FILE ${CUSTOM_EAF_FILES} ${CUSTOM_BIN_FILES})
+            get_filename_component(FILENAME ${FILE} NAME)
+            configure_file(${FILE} ${MERGED_SPIFFS_DIR}/${FILENAME} COPYONLY)
+        endforeach()
+
+        # 使用合并后的目录作为SPIFFS源，保持MMAP_EMOJI_LARGE_*变量名
+        set(SPIFFS_DIR ${MERGED_SPIFFS_DIR})
+
+        message(STATUS "Using custom emotions from ${CUSTOM_EMOTIONS_DIR}")
+        message(STATUS "Custom EAF files: ${CUSTOM_EAF_FILES}")
+        message(STATUS "Custom BIN files: ${CUSTOM_BIN_FILES}")
+        message(STATUS "Merged SPIFFS directory: ${MERGED_SPIFFS_DIR}")
+    endif()
 endif()
 
 target_include_directories(${COMPONENT_LIB} BEFORE PUBLIC
