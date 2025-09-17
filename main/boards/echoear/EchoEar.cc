@@ -9,6 +9,7 @@
 
 #include <wifi_station.h>
 #include <esp_log.h>
+#include <settings.h>
 
 #include <driver/i2c_master.h>
 #include <driver/i2c.h>
@@ -498,15 +499,12 @@ private:
         uint8_t pcb_verison = 0;
         Settings settings("board", true);
 
-        // 如果是软件重启，尝试从NVS读取之前保存的版本
         if (reset_reason != ESP_RST_POWERON) {
-        int saved_version = settings.GetInt("pcb_version", -1);
+            int saved_version = settings.GetInt("pcb_version", -1);
             if (saved_version >= 0) {
                 pcb_verison = static_cast<uint8_t>(saved_version);
                 ESP_LOGI(TAG, "Software restart detected, using saved PCB version V1.2");
-                // 对于V1.2版本，重新初始化GPIO和引脚配置
                 if (pcb_verison == 1) {
-                        // 配置音频编解码器电源控制引脚
                     gpio_config_t gpio_conf = {
                         .pin_bit_mask = (1ULL << GPIO_NUM_48),
                         .mode = GPIO_MODE_OUTPUT,
@@ -516,7 +514,6 @@ private:
                     };
                     ESP_ERROR_CHECK(gpio_config(&gpio_conf));
                     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_48, 1));
-                    // 设置V1.2版本的引脚映射
                     AUDIO_I2S_GPIO_DIN = AUDIO_I2S_GPIO_DIN_2;
                     AUDIO_CODEC_PA_PIN = AUDIO_CODEC_PA_PIN_2;
                     QSPI_PIN_NUM_LCD_RST = QSPI_PIN_NUM_LCD_RST_2;
@@ -528,7 +525,6 @@ private:
             }
         }
 
-        // 冷启动或NVS中没有保存的版本，执行完整的硬件检测
         ESP_LOGI(TAG, "Power-on reset or no saved version, performing hardware detection");
         esp_err_t ret = i2c_master_probe(i2c_bus_, 0x18, 100);
         if (ret == ESP_OK) {
@@ -541,7 +537,7 @@ private:
                 .pull_up_en = GPIO_PULLUP_DISABLE,
                 .pull_down_en = GPIO_PULLDOWN_DISABLE,
                 .intr_type = GPIO_INTR_DISABLE
-        
+            };
             ESP_ERROR_CHECK(gpio_config(&gpio_conf));
             ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_48, 1));
             vTaskDelay(pdMS_TO_TICKS(100));
