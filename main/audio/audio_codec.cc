@@ -33,7 +33,6 @@ void AudioCodec::Start() {
         ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
         output_volume_ = 10;
     }
-    output_volume_ = 10;
 
     if (tx_handle_ != nullptr) {
         ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
