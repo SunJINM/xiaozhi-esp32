@@ -257,6 +257,8 @@ void Application::ToggleChatState() {
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
+            auto music = Board::GetInstance().GetMusic();
+            music->PauseSong();
             AbortSpeaking(kAbortReasonNone);
         });
     } else if (device_state_ == kDeviceStateListening) {
@@ -366,7 +368,9 @@ void Application::Start() {
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
     // Add MCP common tools before initializing the protocol
-    McpServer::GetInstance().AddCommonTools();
+    auto& mcp_server = McpServer::GetInstance();
+    mcp_server.AddCommonTools();
+    mcp_server.AddUserOnlyTools();
 
     if (ota.HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
@@ -776,4 +780,84 @@ void Application::SetAecMode(AecMode mode) {
 
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
+}
+
+// 新增：接收外部音频数据（如音乐播放）
+void Application::AddAudioData(AudioStreamPacket&& packet) {
+    auto codec = Board::GetInstance().GetAudioCodec();
+    if (device_state_ == kDeviceStateSpeaking && codec->output_enabled()) {
+        // packet.payload包含的是原始PCM数据（int16_t）
+        if (packet.payload.size() >= 2) {
+            size_t num_samples = packet.payload.size() / sizeof(int16_t);
+            std::vector<int16_t> pcm_data(num_samples);
+            memcpy(pcm_data.data(), packet.payload.data(), packet.payload.size());
+            
+            // 检查采样率是否匹配，如果不匹配则进行重采样（不再动态切换硬件采样率）
+            if (packet.sample_rate != codec->output_sample_rate()) {
+                ESP_LOGI(TAG, "Resampling music audio from %d to %d Hz",
+                         packet.sample_rate, codec->output_sample_rate());
+
+                // 验证采样率参数
+                if (packet.sample_rate <= 0 || codec->output_sample_rate() <= 0) {
+                    ESP_LOGE(TAG, "Invalid sample rates: %d -> %d",
+                            packet.sample_rate, codec->output_sample_rate());
+                    return;
+                }
+
+                std::vector<int16_t> resampled;
+                float resample_ratio = codec->output_sample_rate() / static_cast<float>(packet.sample_rate);
+
+                if (resample_ratio > 1.0f) {
+                    // 上采样：线性插值
+                    size_t expected_size = static_cast<size_t>(pcm_data.size() * resample_ratio + 0.5f);
+                    resampled.reserve(expected_size);
+
+                    for (size_t i = 0; i < pcm_data.size(); ++i) {
+                        // 添加原始样本
+                        resampled.push_back(pcm_data[i]);
+
+                        // 计算需要插值的样本数
+                        int interpolation_count = static_cast<int>(resample_ratio) - 1;
+                        if (interpolation_count > 0 && i + 1 < pcm_data.size()) {
+                            int16_t current = pcm_data[i];
+                            int16_t next = pcm_data[i + 1];
+                            for (int j = 1; j <= interpolation_count; ++j) {
+                                float t = static_cast<float>(j) / (interpolation_count + 1);
+                                int16_t interpolated = static_cast<int16_t>(current + (next - current) * t);
+                                resampled.push_back(interpolated);
+                            }
+                        } else if (interpolation_count > 0) {
+                            // 最后一个样本，直接重复
+                            for (int j = 1; j <= interpolation_count; ++j) {
+                                resampled.push_back(pcm_data[i]);
+                            }
+                        }
+                    }
+                } else {
+                    // 下采样：简单抽取
+                    float downsample_step = 1.0f / resample_ratio;
+                    for (float pos = 0.0f; pos < pcm_data.size(); pos += downsample_step) {
+                        size_t index = static_cast<size_t>(pos);
+                        if (index < pcm_data.size()) {
+                            resampled.push_back(pcm_data[index]);
+                        }
+                    }
+                }
+
+                ESP_LOGI(TAG, "Resampled %d -> %d samples (ratio: %.2f)",
+                        pcm_data.size(), resampled.size(), resample_ratio);
+                pcm_data = std::move(resampled);
+            }
+            
+            // 确保音频输出已启用
+            if (!codec->output_enabled()) {
+                codec->EnableOutput(true);
+            }
+            
+            // 发送PCM数据到音频编解码器
+            codec->OutputData(pcm_data);
+            
+            audio_service_.UpdateOutputTimestamp();
+        }
+    }
 }

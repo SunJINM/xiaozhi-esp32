@@ -10,7 +10,7 @@
 #include <wifi_station.h>
 #include <esp_log.h>
 #include <settings.h>
-
+#include "esp32_music.h"
 #include <driver/i2c_master.h>
 #include <driver/i2c.h>
 #include "i2c_device.h"
@@ -590,10 +590,10 @@ private:
                     
                     if (app.GetDeviceState() == kDeviceStateStarting &&
                             !WifiStation::GetInstance().IsConnected()) {
-                            board.ResetWifiConfiguration();
+                        board.ResetWifiConfiguration();
                     } else {
-                            app.ToggleChatState();
-                        }
+                        app.ToggleChatState();
+                    }
                 }
             }
         }
@@ -722,6 +722,9 @@ private:
 public:
     EspS3Cat() : boot_button_(BOOT_BUTTON_GPIO)
     {
+        // 初始化音乐播放器
+        music_ = new Esp32Music();
+        ESP_LOGI(TAG, "Music player initialized");
         InitializeI2c();
         uint8_t pcb_verison = DetectPcbVersion();
         InitializeCharge();

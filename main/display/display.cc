@@ -66,3 +66,22 @@ void Display::SetPowerSaveMode(bool on) {
         SetEmotion("neutral");
     }
 }
+
+// 音乐播放相关（用日志模拟UI行为）
+// 显示当前播放的歌曲信息
+void Display::SetMusicInfo(const char* info)
+{
+    ESP_LOGW(TAG, "MusicInfo: %s", info ? info : "");
+}
+
+// 启动频谱显示（此处仅打印日志）
+void Display::start()
+{
+    ESP_LOGW(TAG, "Spectrum start");
+}
+
+// 停止频谱显示（此处仅打印日志）
+void Display::stopFft()
+{
+    ESP_LOGW(TAG, "Spectrum stop");
+}
