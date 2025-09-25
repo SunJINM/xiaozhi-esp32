@@ -767,6 +767,7 @@ void Esp32Music::PlayAudioStream() {
     
     // 标记是否已经处理过ID3标签
     bool id3_processed = false;
+    auto& app = Application::GetInstance();
     
     while (is_playing_) {
         // 检查是否被暂停
@@ -777,7 +778,6 @@ void Esp32Music::PlayAudioStream() {
         }
         
         // 检查设备状态，只有在空闲状态才播放音乐
-        auto& app = Application::GetInstance();
         DeviceState current_state = app.GetDeviceState();
         
         if (current_state == kDeviceStateListening) {
@@ -1028,6 +1028,9 @@ void Esp32Music::PlayAudioStream() {
     
     // 停止播放标志
     is_playing_ = false;
+    app.Schedule([this, &app]() {
+        app.SetDeviceState(kDeviceStateListening);
+    });
     
     // 只在频谱显示模式下才停止FFT显示
     if (display_mode_ == DISPLAY_MODE_SPECTRUM) {

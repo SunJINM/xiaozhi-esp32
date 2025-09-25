@@ -179,7 +179,7 @@ void McpServer::AddUserOnlyTools() {
         //     });
 
         AddTool("self.music.resume_song",
-            "恢复当前播放的音乐。 当用户说要继续播放、接着播放时使用此工具。",
+            "恢复当前播放的音乐。 当用户说要继续播放音乐、接着播放等想要播放当前正在播放的音乐时使用此工具。",
             PropertyList(),
             [music](const PropertyList& properties) -> ReturnValue {
                 bool ok = music->ResumeSong();
