@@ -141,16 +141,16 @@ void McpServer::AddUserOnlyTools() {
                 ESP_LOGI(TAG, "Music details result: %s", download_result.c_str());
                 return "{\"success\": true, \"message\": \"音乐开始播放\"}";
             });
-        AddTool("self.music.set_volume",
-            "Set music volume (0-100).",
-            PropertyList({
-                Property("volume", kPropertyTypeInteger, 0, 100)
-            }),
-            [music](const PropertyList& properties) -> ReturnValue {
-                int vol = properties["volume"].value<int>();
-                bool ok = music->SetVolume(vol);
-                return ok;
-            });
+        // AddTool("self.music.set_volume",
+        //     "Set music volume (0-100).",
+        //     PropertyList({
+        //         Property("volume", kPropertyTypeInteger, 0, 100)
+        //     }),
+        //     [music](const PropertyList& properties) -> ReturnValue {
+        //         int vol = properties["volume"].value<int>();
+        //         bool ok = music->SetVolume(vol);
+        //         return ok;
+        //     });
 
 
         // AddTool("self.music.play",
@@ -179,7 +179,7 @@ void McpServer::AddUserOnlyTools() {
         //     });
 
         AddTool("self.music.resume_song",
-            "Resume current song.",
+            "恢复当前播放的音乐。 当用户说要继续播放、接着播放时使用此工具。",
             PropertyList(),
             [music](const PropertyList& properties) -> ReturnValue {
                 bool ok = music->ResumeSong();
