@@ -258,7 +258,9 @@ void Application::ToggleChatState() {
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
             auto music = Board::GetInstance().GetMusic();
-            music->PauseSong();
+            if (music->IsPlaying()) {
+                music->PauseSong();
+            }
             AbortSpeaking(kAbortReasonNone);
         });
     } else if (device_state_ == kDeviceStateListening) {

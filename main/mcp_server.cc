@@ -153,30 +153,30 @@ void McpServer::AddUserOnlyTools() {
             });
 
 
-        AddTool("self.music.play",
-            "Play current music.",
-            PropertyList(),
-            [music](const PropertyList& properties) -> ReturnValue {
-                bool ok = music->PlaySong();
-                return ok;
-            });
+        // AddTool("self.music.play",
+        //     "Play current music.",
+        //     PropertyList(),
+        //     [music](const PropertyList& properties) -> ReturnValue {
+        //         bool ok = music->PlaySong();
+        //         return ok;
+        //     });
 
         // 兼容更明确的命名：stop_song / pause_song / resume_song
-        AddTool("self.music.stop_song",
-            "Stop current song.",
-            PropertyList(),
-            [music](const PropertyList& properties) -> ReturnValue {
-                bool ok = music->StopSong();
-                return ok;
-            });
+        // AddTool("self.music.stop_song",
+        //     "Stop current song.",
+        //     PropertyList(),
+        //     [music](const PropertyList& properties) -> ReturnValue {
+        //         bool ok = music->StopSong();
+        //         return ok;
+        //     });
 
-        AddTool("self.music.pause_song",
-            "Pause current song.",
-            PropertyList(),
-            [music](const PropertyList& properties) -> ReturnValue {
-                bool ok = music->PauseSong();
-                return ok;
-            });
+        // AddTool("self.music.pause_song",
+        //     "Pause current song.",
+        //     PropertyList(),
+        //     [music](const PropertyList& properties) -> ReturnValue {
+        //         bool ok = music->PauseSong();
+        //         return ok;
+        //     });
 
         AddTool("self.music.resume_song",
             "Resume current song.",

@@ -373,6 +373,7 @@ bool Esp32Music::Download(const std::string& song_name, const std::string& artis
                 ESP_LOGI(TAG, "小智开源音乐固件qq交流群:826072986");
                 ESP_LOGI(TAG, "Starting streaming playback for: %s", song_name.c_str());
                 song_name_displayed_ = false;  // 重置歌名显示标志
+                is_paused_ = false;
                 StartStreaming(current_music_url_);
                 
                 // 处理歌词URL - 只有在歌词显示模式下才启动歌词
@@ -723,6 +724,8 @@ void Esp32Music::PlayAudioStream() {
     current_play_time_ms_ = 0;
     last_frame_time_ms_ = 0;
     total_frames_decoded_ = 0;
+
+    is_waiting_ = true;
     
     auto codec = Board::GetInstance().GetAudioCodec();
     if (!codec || !codec->output_enabled()) {
@@ -777,19 +780,19 @@ void Esp32Music::PlayAudioStream() {
         auto& app = Application::GetInstance();
         DeviceState current_state = app.GetDeviceState();
         
-        // // 等小智把话说完了，变成聆听状态之后，马上转成待机状态，进入音乐播放
-        // if (current_state == kDeviceStateListening) {
-        //     ESP_LOGI(TAG, "Device is in listening state, switching to idle state for music playback");
-        //     // 切换状态
-        //     app.ToggleChatState(); // 变成待机状态
-        //     vTaskDelay(pdMS_TO_TICKS(300));
-        //     continue;
-        // } else if (current_state != kDeviceStateIdle) { // 不是待机状态，就一直卡在这里，不让播放音乐
-        //     ESP_LOGD(TAG, "Device state is %d, pausing music playback", current_state);
-        //     // 如果不是空闲状态，暂停播放
-        //     vTaskDelay(pdMS_TO_TICKS(50));
-        //     continue;
-        // }
+        if (current_state == kDeviceStateListening) {
+            ESP_LOGI(TAG, "Device is not in speaking state, switching to speaking state for music playback");
+            app.Schedule([this, &app]() {
+                app.SetDeviceState(kDeviceStateSpeaking);
+            });
+            vTaskDelay(pdMS_TO_TICKS(300));
+            is_waiting_ = false;
+            continue;
+        } else if (is_waiting_) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
 
         // 只有设备是在说话状态，才能播放音乐
         if (current_state != kDeviceStateSpeaking) {
@@ -1526,6 +1529,7 @@ bool Esp32Music::ResumeSong() {
     
     // 清除暂停标志
     is_paused_ = false;
+    is_waiting_ = true;
     ESP_LOGI(TAG, "Music playback resumed");
     
     // 更新显示状态

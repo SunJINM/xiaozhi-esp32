@@ -31,5 +31,10 @@ uint8_t I2cDevice::ReadReg(uint8_t reg) {
 }
 
 void I2cDevice::ReadRegs(uint8_t reg, uint8_t* buffer, size_t length) {
-    ESP_ERROR_CHECK(i2c_master_transmit_receive(i2c_device_, &reg, 1, buffer, length, 100));
+    esp_err_t ret = i2c_master_transmit_receive(i2c_device_, &reg, 1, buffer, length, 100);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read from register 0x%02x: %s", reg, esp_err_to_name(ret));
+        // Clear the buffer to avoid using garbage data
+        memset(buffer, 0, length);
+    }
 }

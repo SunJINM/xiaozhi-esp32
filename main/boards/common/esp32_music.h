@@ -51,6 +51,7 @@ private:
     std::atomic<bool> is_playing_;
     std::atomic<bool> is_downloading_;
     std::atomic<bool> is_paused_;
+    std::atomic<bool> is_waiting_;
     std::thread play_thread_;
     std::thread download_thread_;
     int64_t current_play_time_ms_;  // 当前播放时间(毫秒)
