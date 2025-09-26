@@ -259,7 +259,7 @@ void Application::ToggleChatState() {
         Schedule([this]() {
             auto music = Board::GetInstance().GetMusic();
             if (music->IsPlaying()) {
-                music->PauseSong();
+                music->StopSong();
             }
             AbortSpeaking(kAbortReasonNone);
         });

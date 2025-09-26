@@ -33,7 +33,7 @@ void AudioCodec::Start() {
         ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
         output_volume_ = 10;
     }
-    output_volume_ = 50;
+    output_volume_ = 20;
 
 
     if (tx_handle_ != nullptr) {
