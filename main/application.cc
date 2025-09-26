@@ -264,9 +264,9 @@ void Application::ToggleChatState() {
             }
         });
     } else if (device_state_ == kDeviceStateListening) {
-        Schedule([this]() {
-            protocol_->CloseAudioChannel();
-        });
+        // Schedule([this]() {
+        //     protocol_->CloseAudioChannel();
+        // });
     }
 }
 
