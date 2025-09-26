@@ -257,11 +257,11 @@ void Application::ToggleChatState() {
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
+            AbortSpeaking(kAbortReasonNone);
             auto music = Board::GetInstance().GetMusic();
             if (music->IsPlaying()) {
                 music->StopSong();
             }
-            AbortSpeaking(kAbortReasonNone);
         });
     } else if (device_state_ == kDeviceStateListening) {
         Schedule([this]() {
