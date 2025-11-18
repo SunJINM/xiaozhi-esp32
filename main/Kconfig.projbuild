@@ -547,6 +547,12 @@ config USE_ACOUSTIC_WIFI_PROVISIONING
     help
         启用声波配网功能，使用音频信号传输 WiFi 配置数据
 
+config USE_BLUETOOTH_PROVISIONING
+    bool "Enable Bluetooth WiFi Provisioning"
+    default y
+    help
+        启用蓝牙配网功能，使用BLE接收WiFi账号密码(默认启用，替代WiFi热点配网)
+
 config AUDIO_DEBUG_UDP_SERVER
     string "Audio Debug UDP Server Address"
     default "192.168.2.100:8000"
