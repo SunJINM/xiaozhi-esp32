@@ -119,28 +119,28 @@ void McpServer::AddUserOnlyTools() {
         auto music = Board::GetInstance().GetMusic();
 
         // 播放指定歌曲（带歌曲名与可选歌手名）
-        AddTool("self.music.play_song",
-            "播放指定的歌曲。当用户要求播放音乐时使用此工具，会自动获取歌曲详情并开始流式播放。\n"
-            "参数:\n"
-            "  `song_name`: 要播放的歌曲名称（必需）。\n"
-            "  `artist_name`: 要播放的歌曲艺术家名称（可选，默认为空字符串）。\n"
-            "返回:\n"
-            "  播放状态信息，不需确认，立刻播放歌曲。",
-            PropertyList({
-                Property("song_name", kPropertyTypeString),
-                Property("artist_name", kPropertyTypeString, "")
-            }),
-            [music](const PropertyList& properties) -> ReturnValue {
-                auto song_name = properties["song_name"].value<std::string>();
-                auto artist_name = properties["artist_name"].value<std::string>();
+        // AddTool("self.music.play_song",
+        //     "播放指定的歌曲。当用户要求播放音乐时使用此工具，会自动获取歌曲详情并开始流式播放。\n"
+        //     "参数:\n"
+        //     "  `song_name`: 要播放的歌曲名称（必需）。\n"
+        //     "  `artist_name`: 要播放的歌曲艺术家名称（可选，默认为空字符串）。\n"
+        //     "返回:\n"
+        //     "  播放状态信息，不需确认，立刻播放歌曲。",
+        //     PropertyList({
+        //         Property("song_name", kPropertyTypeString),
+        //         Property("artist_name", kPropertyTypeString, "")
+        //     }),
+        //     [music](const PropertyList& properties) -> ReturnValue {
+        //         auto song_name = properties["song_name"].value<std::string>();
+        //         auto artist_name = properties["artist_name"].value<std::string>();
                 
-                if (!music->Download(song_name, artist_name)) {
-                    return "{\"success\": false, \"message\": \"获取音乐资源失败\"}";
-                }
-                auto download_result = music->GetDownloadResult();
-                ESP_LOGI(TAG, "Music details result: %s", download_result.c_str());
-                return "{\"success\": true, \"message\": \"音乐开始播放\"}";
-            });
+        //         if (!music->Download(song_name, artist_name)) {
+        //             return "{\"success\": false, \"message\": \"获取音乐资源失败\"}";
+        //         }
+        //         auto download_result = music->GetDownloadResult();
+        //         ESP_LOGI(TAG, "Music details result: %s", download_result.c_str());
+        //         return "{\"success\": true, \"message\": \"音乐开始播放\"}";
+        //     });
         // AddTool("self.music.set_volume",
         //     "Set music volume (0-100).",
         //     PropertyList({

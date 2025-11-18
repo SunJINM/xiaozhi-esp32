@@ -511,11 +511,12 @@ void Application::Start() {
         std::string message = std::string(Lang::Strings::VERSION) + ota.GetCurrentVersion();
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
+        display->SetEmotion("happy");
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
 
         vTaskDelay(pdMS_TO_TICKS(500));
-        audio_service_.PlaySound(Lang::Sounds::OGG_GUIDE);
+        audio_service_.PlaySound(Lang::Sounds::OGG_BIRTHDAY);
     }
 }
 

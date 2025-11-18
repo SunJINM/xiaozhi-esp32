@@ -33,7 +33,7 @@ void AudioCodec::Start() {
         ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
         output_volume_ = 10;
     }
-    output_volume_ = 20;
+    output_volume_ = 50;
 
 
     if (tx_handle_ != nullptr) {
@@ -63,7 +63,7 @@ void AudioCodec::EnableInput(bool enable) {
     }
     input_enabled_ = enable;
     ESP_LOGI(TAG, "Set input enable to %s", enable ? "true" : "false");
-}
+}  
 
 void AudioCodec::EnableOutput(bool enable) {
     if (enable == output_enabled_) {
