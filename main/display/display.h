@@ -1,6 +1,7 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
+#include <lvgl.h>
 #include <esp_timer.h>
 #include <esp_log.h>
 #include <esp_pm.h>
@@ -31,6 +32,10 @@ public:
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
 
+    // QR 码显示方法
+    virtual void ShowQrCode(const char* data);
+    virtual void ClearQrCode();
+
     // 音乐播放相关方法
     virtual void SetMusicInfo(const char* info);
     virtual void start();
@@ -42,12 +47,15 @@ public:
 protected:
     int width_ = 0;
     int height_ = 0;
-    
+
     esp_pm_lock_handle_t pm_lock_ = nullptr;
-    
+
     std::string current_theme_name_;
 
     std::chrono::system_clock::time_point last_status_update_time_;
+
+    // QR 码对象
+    lv_obj_t* qr_code_obj_ = nullptr;
 
     friend class DisplayLockGuard;
 

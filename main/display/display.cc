@@ -1,9 +1,15 @@
 #include <esp_log.h>
 #include <esp_err.h>
 #include <string>
+#include <cstring>
 
 #include "display.h"
 #include "settings.h"
+#include <lvgl.h>
+
+#if LV_USE_QRCODE
+#include "libs/qrcode/lv_qrcode.h"
+#endif
 
 #define TAG "Display"
 
@@ -84,4 +90,77 @@ void Display::start()
 void Display::stopFft()
 {
     ESP_LOGW(TAG, "Spectrum stop");
+}
+
+// 显示 QR 码
+void Display::ShowQrCode(const char* data) {
+    if (!data) {
+        ESP_LOGE(TAG, "QR code data is null");
+        return;
+    }
+
+#if LV_USE_QRCODE
+    ESP_LOGI(TAG, "ShowQrCode: %s", data);
+
+    // 如果已经存在 QR 码对象,先删除
+    if (qr_code_obj_) {
+        lv_obj_delete(qr_code_obj_);
+        qr_code_obj_ = nullptr;
+    }
+
+    // 创建 QR 码对象
+    qr_code_obj_ = lv_qrcode_create(lv_screen_active());
+    if (!qr_code_obj_) {
+        ESP_LOGE(TAG, "Failed to create QR code object");
+        return;
+    }
+
+    // 根据屏幕尺寸设置 QR 码大小
+    // 对于圆形屏幕,需要考虑内切圆的有效显示区域
+    int min_dimension = (width_ < height_ ? width_ : height_);
+    int qr_size = min_dimension / 2;  // 使用屏幕最小边的一半,适配圆形屏幕
+    if (qr_size < 100) qr_size = 100;  // 最小 100 像素
+    if (qr_size > 200) qr_size = 200;  // 最大 200 像素,确保在圆形区域内
+
+    lv_qrcode_set_size(qr_code_obj_, qr_size);
+    lv_qrcode_set_dark_color(qr_code_obj_, lv_color_black());
+    lv_qrcode_set_light_color(qr_code_obj_, lv_color_white());
+
+    // 更新 QR 码数据
+    lv_result_t result = lv_qrcode_update(qr_code_obj_, data, strlen(data));
+    if (result != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to update QR code data");
+        lv_obj_delete(qr_code_obj_);
+        qr_code_obj_ = nullptr;
+        return;
+    }
+
+    // 居中显示
+    lv_obj_center(qr_code_obj_);
+
+    // 添加白色背景和边框,确保二维码清晰可见
+    lv_obj_set_style_bg_color(qr_code_obj_, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(qr_code_obj_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(qr_code_obj_, lv_color_white(), 0);
+    lv_obj_set_style_border_width(qr_code_obj_, 10, 0);  // 增加边框宽度
+    lv_obj_set_style_pad_all(qr_code_obj_, 5, 0);  // 添加内边距
+
+    ESP_LOGI(TAG, "QR code displayed successfully (size: %d, screen: %dx%d)", qr_size, width_, height_);
+#else
+    ESP_LOGW(TAG, "QR code support not enabled (LV_USE_QRCODE=0)");
+    ESP_LOGI(TAG, "QR code data: %s", data);
+#endif
+}
+
+// 清除 QR 码显示
+void Display::ClearQrCode() {
+    ESP_LOGI(TAG, "ClearQrCode");
+
+#if LV_USE_QRCODE
+    if (qr_code_obj_) {
+        lv_obj_delete(qr_code_obj_);
+        qr_code_obj_ = nullptr;
+        ESP_LOGI(TAG, "QR code cleared");
+    }
+#endif
 }

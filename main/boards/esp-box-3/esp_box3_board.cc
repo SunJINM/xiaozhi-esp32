@@ -28,34 +28,34 @@ LV_FONT_DECLARE(font_puhui_20_4);
 #if CONFIG_USE_EMOTE_STYLE
 static const anim::EmoteDisplayConfig kEmoteConfig = {
     .emotion_map = {
-        {"happy",       {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"laughing",    {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"funny",       {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"loving",      {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"embarrassed", {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"confident",   {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"delicious",   {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"sad",         {MMAP_EMOJI_LARGE_SAD_EAF,      true,  20}},
-        {"crying",      {MMAP_EMOJI_LARGE_CRY_EAF,      true,  20}},
-        {"sleepy",      {MMAP_EMOJI_LARGE_SLEEP_EAF,    true,  20}},
-        {"silly",       {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"angry",       {MMAP_EMOJI_LARGE_ANGRY_EAF,    true,  20}},
-        {"surprised",   {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"shocked",     {MMAP_EMOJI_LARGE_SHOCKED_EAF,  true,  20}},
-        {"thinking",    {MMAP_EMOJI_LARGE_CONFUSED_EAF, true,  20}},
-        {"winking",     {MMAP_EMOJI_LARGE_NEUTRAL_EAF,  true,  20}},
-        {"relaxed",     {MMAP_EMOJI_LARGE_HAPPY_EAF,    true,  20}},
-        {"confused",    {MMAP_EMOJI_LARGE_CONFUSED_EAF, true,  20}},
-        {"neutral",     {MMAP_EMOJI_LARGE_WINKING_EAF,  false, 20}},
-        {"idle",        {MMAP_EMOJI_LARGE_NEUTRAL_EAF,  false, 20}},
-        {"listen",      {MMAP_EMOJI_LARGE_LISTEN_EAF,   true,  20}}, // 添加监听动画
+        {"happy",       {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"laughing",    {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"funny",       {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"loving",      {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"embarrassed", {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"confident",   {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"delicious",   {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"sad",         {MMAP_ASSETS_SAD_EAF,      true,  20}},
+        {"crying",      {MMAP_ASSETS_CRY_EAF,      true,  20}},
+        {"sleepy",      {MMAP_ASSETS_SLEEP_EAF,    true,  20}},
+        {"silly",       {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"angry",       {MMAP_ASSETS_ANGRY_EAF,    true,  20}},
+        {"surprised",   {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"shocked",     {MMAP_ASSETS_SHOCKED_EAF,  true,  20}},
+        {"thinking",    {MMAP_ASSETS_CONFUSED_EAF, true,  20}},
+        {"winking",     {MMAP_ASSETS_NEUTRAL_EAF,  true,  20}},
+        {"relaxed",     {MMAP_ASSETS_HAPPY_EAF,    true,  20}},
+        {"confused",    {MMAP_ASSETS_CONFUSED_EAF, true,  20}},
+        {"neutral",     {MMAP_ASSETS_WINKING_EAF,  false, 20}},
+        {"idle",        {MMAP_ASSETS_NEUTRAL_EAF,  false, 20}},
+        {"listen",      {MMAP_ASSETS_LISTEN_EAF,   true,  20}}, // 添加监听动画
     },
     .icon_map = {
-        {"wifi",     MMAP_EMOJI_LARGE_ICON_WIFI_BIN},
-        {"battery",  MMAP_EMOJI_LARGE_ICON_BATTERY_BIN},
-        {"mic",      MMAP_EMOJI_LARGE_ICON_MIC_BIN},
-        {"speaker",  MMAP_EMOJI_LARGE_ICON_SPEAKER_ZZZ_BIN},
-        {"error",    MMAP_EMOJI_LARGE_ICON_WIFI_FAILED_BIN},
+        {"wifi",     MMAP_ASSETS_ICON_WIFI_BIN},
+        {"battery",  MMAP_ASSETS_ICON_BATTERY_BIN},
+        {"mic",      MMAP_ASSETS_ICON_MIC_BIN},
+        {"speaker",  MMAP_ASSETS_ICON_SPEAKER_ZZZ_BIN},
+        {"error",    MMAP_ASSETS_ICON_WIFI_FAILED_BIN},
     },
     .layout = {
         .eye_anim = {
@@ -176,8 +176,8 @@ private:
         // Initialize assets for EmoteDisplay
         const mmap_assets_config_t assets_cfg = {
             .partition_label = "assets",
-            .max_files = MMAP_EMOJI_LARGE_FILES,
-            .checksum = MMAP_EMOJI_LARGE_CHECKSUM,
+            .max_files = MMAP_ASSETS_FILES,
+            .checksum = MMAP_ASSETS_CHECKSUM,
             .flags = {.mmap_enable = true, .full_check = true}
         };
         ESP_ERROR_CHECK(mmap_assets_new(&assets_cfg, &assets_handle_));

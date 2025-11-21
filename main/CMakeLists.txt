@@ -380,7 +380,7 @@ if(CONFIG_BOARD_TYPE_ECHOEAR)
             configure_file(${FILE} ${MERGED_SPIFFS_DIR}/${FILENAME} COPYONLY)
         endforeach()
 
-        # 使用合并后的目录作为SPIFFS源，保持MMAP_EMOJI_LARGE_*变量名
+        # 使用合并后的目录作为SPIFFS源，保持MMAP_ASSETS_*变量名
         set(SPIFFS_DIR ${MERGED_SPIFFS_DIR})
 
         message(STATUS "Using custom emotions from ${CUSTOM_EMOTIONS_DIR}")

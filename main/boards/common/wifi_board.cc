@@ -51,46 +51,67 @@ static const char *TAG = "WifiBoard";
 
 
 static void ip_event_handler(void* arg, esp_event_base_t event_base,
-    int32_t event_id, void* event_data) {
-if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-ESP_LOGI(TAG, "Got IP address, setting CONNECTED_BIT");
-xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-}
+    int32_t event_id, void* event_data) 
+{
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ESP_LOGI(TAG, "Got IP address, setting CONNECTED_BIT");
+        xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
+    }
 }
 
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-int32_t event_id, void* event_data)
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,int32_t event_id, void* event_data)
 {
-switch (event_id) {
-case WIFI_EVENT_STA_DISCONNECTED:
-ESP_LOGI(TAG, "WIFI_EVENT_STA_DISCONNECTED");
-xEventGroupSetBits(wifi_event_group, FAILED_BIT);
-break;
-default:
-break;
-}
-return;
+    switch (event_id) {
+        case WIFI_EVENT_STA_DISCONNECTED:
+            ESP_LOGI(TAG, "WIFI_EVENT_STA_DISCONNECTED");
+            xEventGroupSetBits(wifi_event_group, FAILED_BIT);
+        break;
+        default:
+        break;
+    }
+    return;
 }
 
 
 WifiBoard::WifiBoard() {
     Settings settings("wifi", true);
     wifi_config_mode_ = settings.GetInt("force_ap") == 1;
-    if (wifi_config_mode_) {
-        ESP_LOGI(TAG, "force_ap is set to 1, reset to 0");
-        settings.SetInt("force_ap", 0);
-    }
 }
 
 std::string WifiBoard::GetBoardType() {
     return "wifi";
 }
 
+// 全局变量存储设备名称
+static std::string g_device_name;
+
+void WifiBoard::ResetWifiConfiguration() {
+    // Set a flag and reboot the device to enter the network configuration mode
+    {
+        Settings settings("wifi", true);
+        settings.SetInt("force_ap", 1);
+    }
+    GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    // Reboot the device
+    esp_restart();
+}
+
+
 static void blufi_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *param) {
     ESP_LOGI(TAG, "Blufi event: %d", event);
     switch (event) {
     case ESP_BLUFI_EVENT_INIT_FINISH:
         ESP_LOGI(TAG, "BLUFI init finish");
+        // 在广播启动前设置设备名称
+        if (!g_device_name.empty()) {
+            esp_err_t name_ret = esp_ble_gap_set_device_name(g_device_name.c_str());
+            if (name_ret) {
+                ESP_LOGE(TAG, "Set device name in INIT_FINISH failed: %s", esp_err_to_name(name_ret));
+            } else {
+                ESP_LOGI(TAG, "Device name set to %s in INIT_FINISH", g_device_name.c_str());
+            }
+        }
         esp_blufi_adv_start();
         break;
     case ESP_BLUFI_EVENT_DEINIT_FINISH:
@@ -208,36 +229,26 @@ void WifiBoard::EnterWifiConfigMode() {
         return;
     }
 
-    // Get Bluetooth MAC address
+    // Get Bluetooth MAC address and prepare device name
     uint8_t mac_addr[6];
     esp_err_t mac_ret = esp_read_mac(mac_addr, ESP_MAC_BT);
     if (mac_ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to get Bluetooth MAC address: %s", esp_err_to_name(mac_ret));
         // Fallback to default name if MAC address cannot be read
-        const char *device_name = "XIAOZHI_BLUFI";
-        esp_err_t name_ret = esp_ble_gap_set_device_name(device_name);
-        if (name_ret) {
-            ESP_LOGE(TAG, "Set device name failed: %s", esp_err_to_name(name_ret));
-        } else {
-            ESP_LOGI(TAG, "Device name set to %s", device_name);
-        }
+        g_device_name = "XIAOZHI_BLUFI";
+        ESP_LOGI(TAG, "Will set device name to %s", g_device_name.c_str());
         // QR code will only show default name if MAC is unavailable
-        // auto display = Board::GetInstance().GetDisplay();
-        // if (display) {
-        //     display->ShowQrCode(device_name);
-        // }
+        auto display = Board::GetInstance().GetDisplay();
+        if (display) {
+            display->ShowQrCode(g_device_name.c_str());
+        }
     } else {
         char mac_str_for_name[13]; // 6 bytes * 2 chars + 1 null terminator
         sprintf(mac_str_for_name, "%02X%02X%02X%02X%02X%02X",
                 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-        
-        std::string device_name_str = "XIAOZHI_" + std::string(mac_str_for_name);
-        esp_err_t name_ret = esp_ble_gap_set_device_name(device_name_str.c_str());
-        if (name_ret) {
-            ESP_LOGE(TAG, "Set device name failed: %s", esp_err_to_name(name_ret));
-        } else {
-            ESP_LOGI(TAG, "Device name set to %s", device_name_str.c_str());
-        }
+
+        g_device_name = "XIAOZHI_" + std::string(mac_str_for_name);
+        ESP_LOGI(TAG, "Will set device name to %s", g_device_name.c_str());
 
         char mac_str_for_qr[18];
         sprintf(mac_str_for_qr, "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -245,11 +256,11 @@ void WifiBoard::EnterWifiConfigMode() {
         ESP_LOGI(TAG, "Bluetooth MAC address: %s", mac_str_for_qr);
 
         // Combine device name and MAC address for QR code
-        std::string qr_data = "deviceName=" + device_name_str + "&mac=" + mac_str_for_qr;
-        // auto display = Board::GetInstance().GetDisplay();
-        // if (display) {
-        //     display->ShowQrCode(qr_data.c_str());
-        // }
+        std::string qr_data = "deviceName=" + g_device_name + "&mac=" + mac_str_for_qr;
+        auto display = Board::GetInstance().GetDisplay();
+        if (display) {
+            display->ShowQrCode(qr_data.c_str());
+        }
     }
 
     free_heap = esp_get_free_heap_size();
@@ -269,11 +280,11 @@ void WifiBoard::EnterWifiConfigMode() {
     
         if (bits & CONNECTED_BIT) {
             ESP_LOGI(TAG, "BluFi configuration successful, Wi-Fi connected.");
-    
-            // auto display = Board::GetInstance().GetDisplay();
-            // if (display) {
-            //     display->ClearQrCode();
-            // }
+
+            auto display = Board::GetInstance().GetDisplay();
+            if (display) {
+                display->ClearQrCode();
+            }
             auto& ssid_manager = SsidManager::GetInstance();
             ssid_manager.AddSsid(reinterpret_cast<const char*>(sta_config.sta.ssid), reinterpret_cast<const char*>(sta_config.sta.password));
 
@@ -291,12 +302,7 @@ void WifiBoard::EnterWifiConfigMode() {
                 free(json_str_success);
             }
             cJSON_Delete(root_success);
-            
-            // 反初始化BluFi和蓝牙
-            esp_blufi_host_deinit();
-            esp_bt_controller_disable();
-            esp_bt_controller_deinit();
-            break;
+            esp_restart();
         } else if (bits & FAILED_BIT) {
             ESP_LOGE(TAG, "BluFi configuration timed out or failed.");
             // Send failure custom data
@@ -307,7 +313,6 @@ void WifiBoard::EnterWifiConfigMode() {
 }
 
 void WifiBoard::StartNetwork() {
-    // wifi_config_mode_ = true;
     // User can press BOOT button while starting to enter WiFi configuration mode
     if (wifi_config_mode_) {
         EnterWifiConfigMode();
@@ -347,7 +352,7 @@ void WifiBoard::StartNetwork() {
     if (!wifi_station.WaitForConnected(60 * 1000)) {
         wifi_station.Stop();
         wifi_config_mode_ = true;
-        EnterWifiConfigMode();
+        ResetWifiConfiguration();
         return;
     }
 }
@@ -395,18 +400,6 @@ std::string WifiBoard::GetBoardJson() {
 void WifiBoard::SetPowerSaveMode(bool enabled) {
     auto& wifi_station = WifiStation::GetInstance();
     wifi_station.SetPowerSaveMode(enabled);
-}
-
-void WifiBoard::ResetWifiConfiguration() {
-    // Set a flag and reboot the device to enter the network configuration mode
-    {
-        Settings settings("wifi", true);
-        settings.SetInt("force_ap", 1);
-    }
-    GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    // Reboot the device
-    esp_restart();
 }
 
 std::string WifiBoard::GetDeviceStatusJson() {
