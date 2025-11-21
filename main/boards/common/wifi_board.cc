@@ -30,6 +30,9 @@
 static EventGroupHandle_t wifi_event_group;
 const int CONNECTED_BIT = BIT0;
 const int FAILED_BIT = BIT1;
+const int FAILED_AUTH_BIT = BIT2;      // 认证失败（密码错误）
+const int FAILED_NOT_FOUND_BIT = BIT3; // WiFi未找到
+const int FAILED_TIMEOUT_BIT = BIT4;   // 连接超时
 static bool ble_is_connected = false;
 static wifi_config_t sta_config;
 
@@ -62,12 +65,37 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,int32_t event_id, void* event_data)
 {
     switch (event_id) {
-        case WIFI_EVENT_STA_DISCONNECTED:
-            ESP_LOGI(TAG, "WIFI_EVENT_STA_DISCONNECTED");
-            xEventGroupSetBits(wifi_event_group, FAILED_BIT);
-        break;
+        case WIFI_EVENT_STA_DISCONNECTED: {
+            wifi_event_sta_disconnected_t* disconnected = (wifi_event_sta_disconnected_t*) event_data;
+            ESP_LOGI(TAG, "WIFI_EVENT_STA_DISCONNECTED, reason: %d", disconnected->reason);
+
+            // 根据断开原因设置不同的失败位
+            switch (disconnected->reason) {
+                case WIFI_REASON_AUTH_FAIL:
+                case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+                case WIFI_REASON_HANDSHAKE_TIMEOUT:
+                    ESP_LOGE(TAG, "Authentication failed");
+                    xEventGroupSetBits(wifi_event_group, FAILED_BIT | FAILED_AUTH_BIT);
+                    break;
+                case WIFI_REASON_NO_AP_FOUND:
+                case WIFI_REASON_BEACON_TIMEOUT:
+                    ESP_LOGE(TAG, "AP not found");
+                    xEventGroupSetBits(wifi_event_group, FAILED_BIT | FAILED_NOT_FOUND_BIT);
+                    break;
+                case WIFI_REASON_ASSOC_EXPIRE:
+                case WIFI_REASON_CONNECTION_FAIL:
+                    ESP_LOGE(TAG, "Connection timeout");
+                    xEventGroupSetBits(wifi_event_group, FAILED_BIT | FAILED_TIMEOUT_BIT);
+                    break;
+                default:
+                    ESP_LOGE(TAG, "Unknown failure reason");
+                    xEventGroupSetBits(wifi_event_group, FAILED_BIT);
+                    break;
+            }
+            break;
+        }
         default:
-        break;
+            break;
     }
     return;
 }
@@ -273,11 +301,12 @@ void WifiBoard::EnterWifiConfigMode() {
     
     // Wait forever until reset after configuration
     while(true) {
-        EventBits_t bits = xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT | FAILED_BIT, 
+        EventBits_t bits = xEventGroupWaitBits(wifi_event_group,
+            CONNECTED_BIT | FAILED_BIT | FAILED_AUTH_BIT | FAILED_NOT_FOUND_BIT | FAILED_TIMEOUT_BIT,
             pdTRUE,
             pdFALSE,
             portMAX_DELAY);
-    
+
         if (bits & CONNECTED_BIT) {
             ESP_LOGI(TAG, "BluFi configuration successful, Wi-Fi connected.");
 
@@ -288,26 +317,55 @@ void WifiBoard::EnterWifiConfigMode() {
             auto& ssid_manager = SsidManager::GetInstance();
             ssid_manager.AddSsid(reinterpret_cast<const char*>(sta_config.sta.ssid), reinterpret_cast<const char*>(sta_config.sta.password));
 
-            // Send success custom data
-            cJSON *root_success = cJSON_CreateObject();
-            cJSON_AddNumberToObject(root_success, "type", 4);
-            cJSON_AddTrueToObject(root_success, "result");
-            cJSON *data_success = cJSON_CreateObject();
-            cJSON_AddNumberToObject(data_success, "progress", 100);
-            cJSON_AddStringToObject(data_success, "ssid", reinterpret_cast<const char*>(sta_config.sta.ssid));
-            cJSON_AddItemToObject(root_success, "data", data_success);
-            char *json_str_success = cJSON_PrintUnformatted(root_success);
-            if (json_str_success) {
-                esp_blufi_send_custom_data((uint8_t*)json_str_success, strlen(json_str_success));
-                free(json_str_success);
+            // Get WiFi MAC address
+            uint8_t mac[6];
+            esp_wifi_get_mac(WIFI_IF_STA, mac);
+            char mac_str[18];
+            sprintf(mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+            // Send success response: status=0
+            cJSON *root = cJSON_CreateObject();
+            cJSON_AddNumberToObject(root, "status", 0);
+            cJSON_AddStringToObject(root, "mac", mac_str);
+            cJSON_AddStringToObject(root, "ssid", reinterpret_cast<const char*>(sta_config.sta.ssid));
+            char *json_str = cJSON_PrintUnformatted(root);
+            if (json_str) {
+                esp_blufi_send_custom_data((uint8_t*)json_str, strlen(json_str));
+                free(json_str);
             }
-            cJSON_Delete(root_success);
+            cJSON_Delete(root);
+
+            vTaskDelay(pdMS_TO_TICKS(500)); // Wait for BLE transmission
             esp_restart();
         } else if (bits & FAILED_BIT) {
-            ESP_LOGE(TAG, "BluFi configuration timed out or failed.");
-            // Send failure custom data
-            const char *json_str_fail = "wifi connect fail";
-            esp_blufi_send_custom_data((uint8_t*)json_str_fail, strlen(json_str_fail));
+            ESP_LOGE(TAG, "BluFi configuration failed.");
+
+            // 根据事件位确定失败原因
+            int status_code = 4; // 默认：未知错误
+            const char *error_msg = "未知错误";
+
+            if (bits & FAILED_AUTH_BIT) {
+                status_code = 1;
+                error_msg = "密码错误";
+            } else if (bits & FAILED_NOT_FOUND_BIT) {
+                status_code = 2;
+                error_msg = "WiFi未找到";
+            } else if (bits & FAILED_TIMEOUT_BIT) {
+                status_code = 3;
+                error_msg = "连接超时";
+            }
+
+            // Send failure response
+            cJSON *root = cJSON_CreateObject();
+            cJSON_AddNumberToObject(root, "status", status_code);
+            cJSON_AddStringToObject(root, "msg", error_msg);
+            char *json_str = cJSON_PrintUnformatted(root);
+            if (json_str) {
+                esp_blufi_send_custom_data((uint8_t*)json_str, strlen(json_str));
+                free(json_str);
+            }
+            cJSON_Delete(root);
         }
     }
 }
