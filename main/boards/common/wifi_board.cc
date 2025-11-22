@@ -309,16 +309,7 @@ void WifiBoard::EnterWifiConfigMode() {
 
         if (bits & CONNECTED_BIT) {
             ESP_LOGI(TAG, "BluFi configuration successful, Wi-Fi connected.");
-
-            auto display = Board::GetInstance().GetDisplay();
-            if (display) {
-                display->ClearQrCode();
-            }
-            auto& ssid_manager = SsidManager::GetInstance();
-            ssid_manager.AddSsid(reinterpret_cast<const char*>(sta_config.sta.ssid), reinterpret_cast<const char*>(sta_config.sta.password));
-
-            // Get WiFi MAC address
-            uint8_t mac[6];
+                        uint8_t mac[6];
             esp_wifi_get_mac(WIFI_IF_STA, mac);
             char mac_str[18];
             sprintf(mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -336,6 +327,10 @@ void WifiBoard::EnterWifiConfigMode() {
                 free(json_str);
             }
             cJSON_Delete(root);
+            auto& ssid_manager = SsidManager::GetInstance();
+            ssid_manager.AddSsid(reinterpret_cast<const char*>(sta_config.sta.ssid), reinterpret_cast<const char*>(sta_config.sta.password));
+
+            // Get WiFi MAC address
 
             vTaskDelay(pdMS_TO_TICKS(500)); // Wait for BLE transmission
             esp_restart();

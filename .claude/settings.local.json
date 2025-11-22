@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(mkdir:*)",
-      "Bash(idf.py build:*)"
+      "Bash(idf.py build:*)",
+      "Bash(if [ ! -d \"claudedocs\" ])",
+      "Bash(then mkdir claudedocs)",
+      "Bash(else echo \"claudedocs directory already exists\")",
+      "Bash(fi)"
     ],
     "deny": [],
     "ask": []
