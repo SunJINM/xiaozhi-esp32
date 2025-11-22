@@ -331,6 +331,7 @@ void WifiBoard::EnterWifiConfigMode() {
             cJSON_AddStringToObject(root, "ssid", reinterpret_cast<const char*>(sta_config.sta.ssid));
             char *json_str = cJSON_PrintUnformatted(root);
             if (json_str) {
+                ESP_LOGI(TAG, "send data %s", json_str);
                 esp_blufi_send_custom_data((uint8_t*)json_str, strlen(json_str));
                 free(json_str);
             }
@@ -362,6 +363,7 @@ void WifiBoard::EnterWifiConfigMode() {
             cJSON_AddStringToObject(root, "msg", error_msg);
             char *json_str = cJSON_PrintUnformatted(root);
             if (json_str) {
+                ESP_LOGI(TAG, "send data %s", json_str);
                 esp_blufi_send_custom_data((uint8_t*)json_str, strlen(json_str));
                 free(json_str);
             }

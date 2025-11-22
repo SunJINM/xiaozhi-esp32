@@ -158,9 +158,14 @@ void Display::ClearQrCode() {
 
 #if LV_USE_QRCODE
     if (qr_code_obj_) {
-        lv_obj_delete(qr_code_obj_);
+        // 检查对象是否仍然有效
+        if (lv_obj_is_valid(qr_code_obj_)) {
+            lv_obj_delete(qr_code_obj_);
+            ESP_LOGI(TAG, "QR code cleared");
+        } else {
+            ESP_LOGW(TAG, "QR code object already invalid");
+        }
         qr_code_obj_ = nullptr;
-        ESP_LOGI(TAG, "QR code cleared");
     }
 #endif
 }
