@@ -8,6 +8,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <vector>
+#include <functional>
 
 #include "music.h"
 
@@ -38,20 +39,13 @@ private:
     std::string current_music_url_;
     std::string current_song_name_;
     bool song_name_displayed_;
-    
-    // 歌词相关
-    std::string current_lyric_url_;
-    std::vector<std::pair<int, std::string>> lyrics_;  // 时间戳和歌词文本
-    std::mutex lyrics_mutex_;  // 保护lyrics_数组的互斥锁
-    std::atomic<int> current_lyric_index_;
-    std::thread lyric_thread_;
-    std::atomic<bool> is_lyric_running_;
-    
+
     std::atomic<DisplayMode> display_mode_;
     std::atomic<bool> is_playing_;
     std::atomic<bool> is_downloading_;
     std::atomic<bool> is_paused_;
     std::atomic<bool> is_waiting_;
+    std::atomic<bool> is_automated_;
     std::thread play_thread_;
     std::thread download_thread_;
     int64_t current_play_time_ms_;  // 当前播放时间(毫秒)
@@ -78,25 +72,19 @@ private:
     bool InitializeMp3Decoder();
     void CleanupMp3Decoder();
     void ResetSampleRate();  // 重置采样率到原始值
-    
-    // 歌词相关私有方法
-    bool DownloadLyrics(const std::string& lyric_url);
-    bool ParseLyrics(const std::string& lyric_content);
-    void LyricDisplayThread();
-    void UpdateLyricDisplay(int64_t current_time_ms);
-    
+
     // ID3标签处理
     size_t SkipId3Tag(uint8_t* data, size_t size);
 
     int16_t* final_pcm_data_fft = nullptr;
 
+    // 回调函数
+    std::function<void()> on_song_finished_;
+    std::function<void(const std::string&)> on_error_;
+
 public:
     Esp32Music();
     ~Esp32Music();
-
-    virtual bool Download(const std::string& song_name, const std::string& artist_name) override;
-  
-    virtual std::string GetDownloadResult() override;
     
     // 新增方法
     virtual bool StartStreaming(const std::string& music_url) override;
@@ -110,8 +98,13 @@ public:
     // 显示模式控制方法
     void SetDisplayMode(DisplayMode mode);
     DisplayMode GetDisplayMode() const { return display_mode_.load(); }
-    
-    // MCP工具需要的方法
+
+    // 回调设置
+    void SetSongFinishedCallback(std::function<void()> callback) { on_song_finished_ = callback; }
+    void SetErrorCallback(std::function<void(const std::string&)> callback) { on_error_ = callback; }
+
+    void SetAutomated(bool is_automated);
+
     virtual bool PlaySong() override;
     virtual bool SetVolume(int volume) override;
     virtual bool StopSong() override;

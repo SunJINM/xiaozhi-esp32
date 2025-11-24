@@ -281,6 +281,7 @@ private:
     ~McpServer();
 
     void ParseCapabilities(const cJSON* capabilities);
+    void ParseDeviceStatus(const cJSON* device_status);
 
     void ReplyResult(int id, const std::string& result);
     void ReplyError(int id, const std::string& message);

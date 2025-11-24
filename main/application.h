@@ -16,6 +16,9 @@
 #include "audio_service.h"
 #include "device_state_event.h"
 
+// 前向声明,避免循环依赖
+class MusicPlaylistManager;
+
 
 #define MAIN_EVENT_SCHEDULE (1 << 0)
 #define MAIN_EVENT_SEND_AUDIO (1 << 1)
@@ -84,10 +87,25 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;
 
+    // 音乐播放管理
+    std::unique_ptr<MusicPlaylistManager> music_playlist_manager_;
+    esp_timer_handle_t music_status_timer_ = nullptr;
+
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
+
+    // 音乐控制方法
+    void HandleMusicCommand(const cJSON* data);
+    void HandleMusicSetPlaylist(const cJSON* data);
+    void HandleMusicControl(const std::string& action);
+    void HandleMusicSetMode(const cJSON* data);
+    void OnMusicSongFinished();
+    void SendMusicStatus(bool force = false);
+    void StartMusicStatusTimer();
+    void StopMusicStatusTimer();
+    static void MusicStatusTimerCallback(void* arg);
 };
 
 #endif // _APPLICATION_H_

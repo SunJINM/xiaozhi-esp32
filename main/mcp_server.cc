@@ -240,6 +240,20 @@ void McpServer::ParseCapabilities(const cJSON* capabilities) {
     }
 }
 
+void McpServer::ParseDeviceStatus(const cJSON* device_status) {
+    auto volume_node = cJSON_GetObjectItem(device_status, "volume");
+    if (!cJSON_IsNumber(volume_node)) {
+        // 处理：volume 不是数字（如字符串、布尔值等非法类型）
+        return;
+    }
+    int volume_val = cJSON_GetNumberValue(volume_node);
+    if (volume_val >= 0 && volume_val <= 100) {
+        auto& board = Board::GetInstance();
+        auto codec = board.GetAudioCodec();
+        codec->SetOutputVolume(volume_val);
+    }
+}
+
 void McpServer::ParseMessage(const cJSON* json) {
     // Check JSONRPC version
     auto version = cJSON_GetObjectItem(json, "jsonrpc");
@@ -279,6 +293,10 @@ void McpServer::ParseMessage(const cJSON* json) {
             auto capabilities = cJSON_GetObjectItem(params, "capabilities");
             if (cJSON_IsObject(capabilities)) {
                 ParseCapabilities(capabilities);
+            }
+            auto device_status = cJSON_GetObjectItem(params, "deviceStatus");
+            if (cJSON_IsObject(device_status)) {
+                ParseDeviceStatus(device_status);
             }
         }
         auto app_desc = esp_app_get_description();

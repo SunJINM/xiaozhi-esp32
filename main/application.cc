@@ -7,6 +7,7 @@
 #include "websocket_protocol.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
+#include "boards/common/music_playlist_manager.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -57,12 +58,19 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+    // 初始化音乐播放管理器
+    music_playlist_manager_ = std::make_unique<MusicPlaylistManager>();
 }
 
 Application::~Application() {
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
+    }
+    if (music_status_timer_ != nullptr) {
+        esp_timer_stop(music_status_timer_);
+        esp_timer_delete(music_status_timer_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -353,6 +361,23 @@ void Application::Start() {
     };
     audio_service_.SetCallbacks(callbacks);
 
+    /* Setup music callbacks */
+    auto music = board.GetMusic();
+    if (music != nullptr) {
+        music->SetSongFinishedCallback([this]() {
+            Schedule([this]() {
+                OnMusicSongFinished();
+            });
+        });
+        music->SetErrorCallback([this](const std::string& error) {
+            ESP_LOGE(TAG, "Music playback error: %s", error.c_str());
+            Schedule([this]() {
+                StopMusicStatusTimer();
+                SendMusicStatus(true);  // 发送错误状态
+            });
+        });
+    }
+
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
@@ -496,6 +521,19 @@ void Application::Start() {
                 ESP_LOGW(TAG, "Invalid custom message format: missing payload");
             }
 #endif
+        } else if (strcmp(type->valuestring, "music") == 0) {
+            auto data = cJSON_GetObjectItem(root, "data");
+            if (cJSON_IsObject(data)) {
+                Schedule([this, data_str = std::string(cJSON_PrintUnformatted(data))]() {
+                    cJSON* data_obj = cJSON_Parse(data_str.c_str());
+                    if (data_obj != nullptr) {
+                        HandleMusicCommand(data_obj);
+                        cJSON_Delete(data_obj);
+                    }
+                });
+            } else {
+                ESP_LOGW(TAG, "Invalid music message format: missing data");
+            }
         } else {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
         }
@@ -797,8 +835,6 @@ void Application::AddAudioData(AudioStreamPacket&& packet) {
             
             // 检查采样率是否匹配，如果不匹配则进行重采样（不再动态切换硬件采样率）
             if (packet.sample_rate != codec->output_sample_rate()) {
-                ESP_LOGI(TAG, "Resampling music audio from %d to %d Hz",
-                         packet.sample_rate, codec->output_sample_rate());
 
                 // 验证采样率参数
                 if (packet.sample_rate <= 0 || codec->output_sample_rate() <= 0) {
@@ -847,8 +883,6 @@ void Application::AddAudioData(AudioStreamPacket&& packet) {
                     }
                 }
 
-                ESP_LOGI(TAG, "Resampled %d -> %d samples (ratio: %.2f)",
-                        pcm_data.size(), resampled.size(), resample_ratio);
                 pcm_data = std::move(resampled);
             }
             
@@ -863,4 +897,292 @@ void Application::AddAudioData(AudioStreamPacket&& packet) {
             audio_service_.UpdateOutputTimestamp();
         }
     }
+}
+
+// ============================================================
+// 音乐播放控制
+// ============================================================
+
+void Application::HandleMusicCommand(const cJSON* data) {
+    auto action = cJSON_GetObjectItem(data, "action");
+    if (!cJSON_IsString(action)) {
+        ESP_LOGW(TAG, "Music command missing action field");
+        return;
+    }
+
+    std::string action_str = action->valuestring;
+    ESP_LOGI(TAG, "Music command: %s", action_str.c_str());
+
+    if (action_str == "set_playlist") {
+        HandleMusicSetPlaylist(data);
+    } else if (action_str == "play" || action_str == "pause" || action_str == "resume" ||
+               action_str == "stop" || action_str == "next" || action_str == "prev") {
+        HandleMusicControl(action_str);
+    } else if (action_str == "set_mode") {
+        HandleMusicSetMode(data);
+    } else {
+        ESP_LOGW(TAG, "Unknown music action: %s", action_str.c_str());
+    }
+}
+
+void Application::HandleMusicSetPlaylist(const cJSON* data) {
+    // 解析播放列表
+    auto playlist_id = cJSON_GetObjectItem(data, "playlist_id");
+    auto resource_type = cJSON_GetObjectItem(data, "resource_type");
+    auto items = cJSON_GetObjectItem(data, "items");
+    auto start_item_id = cJSON_GetObjectItem(data, "start_item_id");
+    auto play_mode = cJSON_GetObjectItem(data, "play_mode");
+    auto play_type = cJSON_GetObjectItem(data, "play_type");
+
+    if (!cJSON_IsNumber(playlist_id) || !cJSON_IsNumber(resource_type) ||
+        !cJSON_IsArray(items) || !cJSON_IsNumber(start_item_id) ||
+        !cJSON_IsNumber(play_mode) || !cJSON_IsNumber(play_type)) {
+        ESP_LOGW(TAG, "Invalid set_playlist parameters");
+        return;
+    }
+
+    // 设置播放列表信息
+    music_playlist_manager_->SetPlaylistId(playlist_id->valueint);
+    music_playlist_manager_->SetResourceType(resource_type->valueint);
+    music_playlist_manager_->SetPlayMode(static_cast<PlayMode>(play_mode->valueint));
+    music_playlist_manager_->SetPlayType(static_cast<PlayType>(play_type->valueint));
+
+    // 解析播放项
+    std::vector<MusicItem> playlist;
+    int array_size = cJSON_GetArraySize(items);
+    for (int i = 0; i < array_size; i++) {
+        cJSON* item = cJSON_GetArrayItem(items, i);
+        auto item_id = cJSON_GetObjectItem(item, "item_id");
+        auto url = cJSON_GetObjectItem(item, "url");
+        auto resource_name = cJSON_GetObjectItem(item, "resource_name");
+        auto duration = cJSON_GetObjectItem(item, "duration");
+
+        if (cJSON_IsNumber(item_id) && cJSON_IsString(url) &&
+            cJSON_IsString(resource_name) && cJSON_IsNumber(duration)) {
+            MusicItem music_item(
+                item_id->valueint,
+                url->valuestring,
+                resource_name->valuestring,
+                duration->valueint
+            );
+            playlist.push_back(music_item);
+        }
+    }
+
+    music_playlist_manager_->SetPlaylist(playlist);
+    music_playlist_manager_->SetCurrentByItemId(start_item_id->valueint);
+
+    ESP_LOGI(TAG, "Playlist set: id=%d, type=%d, mode=%d, play_type=%d, items=%d, start=%d",
+             playlist_id->valueint, resource_type->valueint,
+             play_mode->valueint, play_type->valueint,
+             playlist.size(), start_item_id->valueint);
+
+    // 自动开始播放第一首
+    auto& board = Board::GetInstance();
+    auto music = board.GetMusic();
+    if (music != nullptr) {
+        const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
+        if (current_item != nullptr) {
+            ESP_LOGI(TAG, "Starting playback: %s", current_item->resource_name.c_str());
+            if (music->StartStreaming(current_item->url)) {
+                StartMusicStatusTimer();
+                SendMusicStatus(true);  // 立即发送开始播放状态
+            } else {
+                ESP_LOGE(TAG, "Failed to start streaming");
+            }
+        }
+    }
+}
+
+void Application::HandleMusicControl(const std::string& action) {
+    auto& board = Board::GetInstance();
+    auto music = board.GetMusic();
+    if (music == nullptr) {
+        ESP_LOGW(TAG, "Music not available");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Music control: %s", action.c_str());
+
+    if (action == "play") {
+        music->PlaySong();
+        SendMusicStatus(true);
+    } else if (action == "pause") {
+        music->PauseSong();
+        SendMusicStatus(true);
+    } else if (action == "resume") {
+        music->ResumeSong();
+        SendMusicStatus(true);
+    } else if (action == "stop") {
+        music->StopSong();
+        StopMusicStatusTimer();
+        SendMusicStatus(true);
+    } else if (action == "next") {
+        // 手动切换下一曲 - 不受播放模式限制
+        const MusicItem* next_item = music_playlist_manager_->ManualNext();
+        if (next_item != nullptr) {
+            ESP_LOGI(TAG, "Manual next: %s (item_id=%d)",
+                     next_item->resource_name.c_str(), next_item->item_id);
+            music->StopStreaming();
+            if (music->StartStreaming(next_item->url)) {
+                SendMusicStatus(true);
+            }
+        } else {
+            ESP_LOGW(TAG, "Manual next failed: playlist empty");
+        }
+    } else if (action == "prev") {
+        // 手动切换上一曲 - 不受播放模式限制
+        const MusicItem* prev_item = music_playlist_manager_->ManualPrevious();
+        if (prev_item != nullptr) {
+            ESP_LOGI(TAG, "Manual previous: %s (item_id=%d)",
+                     prev_item->resource_name.c_str(), prev_item->item_id);
+            music->StopStreaming();
+            if (music->StartStreaming(prev_item->url)) {
+                SendMusicStatus(true);
+            }
+        } else {
+            ESP_LOGW(TAG, "Manual previous failed: playlist empty");
+        }
+    }
+}
+
+void Application::HandleMusicSetMode(const cJSON* data) {
+    auto play_mode = cJSON_GetObjectItem(data, "play_mode");
+    auto play_type = cJSON_GetObjectItem(data, "play_type");
+
+    if (cJSON_IsNumber(play_mode)) {
+        music_playlist_manager_->SetPlayMode(static_cast<PlayMode>(play_mode->valueint));
+        ESP_LOGI(TAG, "Play mode changed to: %d", play_mode->valueint);
+    }
+
+    if (cJSON_IsNumber(play_type)) {
+        music_playlist_manager_->SetPlayType(static_cast<PlayType>(play_type->valueint));
+        ESP_LOGI(TAG, "Play type changed to: %d", play_type->valueint);
+    }
+
+    SendMusicStatus(true);
+}
+
+void Application::OnMusicSongFinished() {
+    ESP_LOGI(TAG, "Song finished callback");
+
+    const MusicItem* next_item = music_playlist_manager_->GetNextItem();
+
+    if (next_item != nullptr) {
+        ESP_LOGI(TAG, "Auto-playing next: %s (item_id=%d)",
+                 next_item->resource_name.c_str(), next_item->item_id);
+
+        auto& board = Board::GetInstance();
+        auto music = board.GetMusic();
+        if (music != nullptr) {
+            music->SetAutomated(true);
+            if (music->StartStreaming(next_item->url)) {
+                SendMusicStatus(true);  // 发送新歌曲开始状态
+            } else {
+                ESP_LOGE(TAG, "Failed to start next item");
+                StopMusicStatusTimer();
+                SendMusicStatus(true);
+            }
+        }
+    } else {
+        ESP_LOGI(TAG, "No more items, playlist finished");
+        StopMusicStatusTimer();
+        SendMusicStatus(true);  // 发送播放结束状态
+    }
+}
+
+void Application::SendMusicStatus(bool force) {
+    auto& board = Board::GetInstance();
+    auto music = board.GetMusic();
+    if (music == nullptr) {
+        return;
+    }
+
+    const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
+
+    // 构建状态JSON
+    cJSON* status = cJSON_CreateObject();
+    cJSON_AddNumberToObject(status, "playlist_id", music_playlist_manager_->GetPlaylistId());
+    cJSON_AddNumberToObject(status, "resource_type", music_playlist_manager_->GetResourceType());
+
+    if (current_item != nullptr) {
+        cJSON_AddNumberToObject(status, "item_id", current_item->item_id);
+        cJSON_AddStringToObject(status, "resource_name", current_item->resource_name.c_str());
+        cJSON_AddNumberToObject(status, "duration", current_item->duration);
+    } else {
+        cJSON_AddNumberToObject(status, "item_id", 0);
+        cJSON_AddStringToObject(status, "resource_name", "");
+        cJSON_AddNumberToObject(status, "duration", 0);
+    }
+
+    // 播放状态: 0=停止, 1=播放中, 2=暂停
+    int play_status = 0;
+    if (music->IsPlaying()) {
+        play_status = 1;
+    } else if (music->IsPaused()) {
+        play_status = 2;
+    }
+    cJSON_AddNumberToObject(status, "play_status", play_status);
+
+    cJSON_AddNumberToObject(status, "play_mode", music_playlist_manager_->GetPlayMode());
+    cJSON_AddNumberToObject(status, "play_type", music_playlist_manager_->GetPlayType());
+
+    char* status_str = cJSON_PrintUnformatted(status);
+    if (status_str != nullptr) {
+        ESP_LOGI(TAG, "Music status: %s", status_str);
+
+        // 构建完整消息
+        cJSON* message = cJSON_CreateObject();
+        cJSON_AddStringToObject(message, "type", "music_status");
+        cJSON_AddItemToObject(message, "data", status);  // status的所有权转移
+
+        char* message_str = cJSON_PrintUnformatted(message);
+        if (message_str != nullptr) {
+            protocol_->SendJson(message_str);
+            free(message_str);
+        }
+
+        cJSON_Delete(message);
+        free(status_str);
+    } else {
+        cJSON_Delete(status);
+    }
+}
+
+void Application::StartMusicStatusTimer() {
+    if (music_status_timer_ != nullptr) {
+        return;  // 定时器已存在
+    }
+
+    esp_timer_create_args_t timer_args = {
+        .callback = MusicStatusTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "music_status_timer",
+        .skip_unhandled_events = true
+    };
+
+    esp_err_t err = esp_timer_create(&timer_args, &music_status_timer_);
+    if (err == ESP_OK) {
+        esp_timer_start_periodic(music_status_timer_, 3000000);  // 3秒
+        ESP_LOGI(TAG, "Music status timer started");
+    } else {
+        ESP_LOGE(TAG, "Failed to create music status timer: %d", err);
+    }
+}
+
+void Application::StopMusicStatusTimer() {
+    if (music_status_timer_ != nullptr) {
+        esp_timer_stop(music_status_timer_);
+        esp_timer_delete(music_status_timer_);
+        music_status_timer_ = nullptr;
+        ESP_LOGI(TAG, "Music status timer stopped");
+    }
+}
+
+void Application::MusicStatusTimerCallback(void* arg) {
+    Application* app = static_cast<Application*>(arg);
+    app->Schedule([app]() {
+        app->SendMusicStatus(false);
+    });
 }

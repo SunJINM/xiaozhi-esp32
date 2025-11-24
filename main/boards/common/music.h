@@ -2,14 +2,20 @@
 #define MUSIC_H
 
 #include <string>
+#include <functional>
 
 class Music {
 public:
     virtual ~Music() = default;  // 添加虚析构函数
-    
-    virtual bool Download(const std::string& song_name, const std::string& artist_name = "") = 0;
-    virtual std::string GetDownloadResult() = 0;
-    
+
+    // 旧的搜索功能(已废弃,提供默认空实现以保持兼容性)
+    virtual bool Download(const std::string& song_name, const std::string& artist_name = "") {
+        return false;  // 默认不支持
+    }
+    virtual std::string GetDownloadResult() {
+        return "";  // 默认返回空字符串
+    }
+
     // 新增流式播放相关方法
     virtual bool StartStreaming(const std::string& music_url) = 0;
     virtual bool StopStreaming() = 0;  // 停止流式播放
@@ -18,13 +24,23 @@ public:
     virtual bool IsPlaying() const = 0;
     virtual bool IsPaused() const = 0;
     virtual int16_t* GetAudioData() = 0;
-    
+
     // MCP工具需要的方法
     virtual bool PlaySong() = 0;
     virtual bool SetVolume(int volume) = 0;
     virtual bool StopSong() = 0;
     virtual bool PauseSong() = 0;
     virtual bool ResumeSong() = 0;
+
+    // 回调设置方法(提供空实现,子类可选择性覆盖)
+    virtual void SetSongFinishedCallback(std::function<void()> callback) {
+        // 默认空实现
+    }
+    virtual void SetErrorCallback(std::function<void(const std::string&)> callback) {
+        // 默认空实现
+    }
+
+    virtual void SetAutomated(bool is_automated) = 0;
 };
 
 #endif // MUSIC_H 
