@@ -36,6 +36,10 @@ const int FAILED_TIMEOUT_BIT = BIT4;   // 连接超时
 static bool ble_is_connected = false;
 static wifi_config_t sta_config;
 
+// Manufacturer Data for iOS MAC address accessibility
+static uint8_t g_manufacturer_data[8];
+
+
 // Forward declaration for Blufi callback
 static void blufi_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *param);
 
@@ -125,22 +129,60 @@ void WifiBoard::ResetWifiConfiguration() {
     esp_restart();
 }
 
+// 自定义的 esp_blufi_adv_start 实现
+// 注意：这个函数在BluFi内部被调用，我们在这里重写它来注入Manufacturer Data
+// 这样可以确保每次BluFi启动广播时都会包含MAC地址信息
+void esp_blufi_adv_start(const char *name)
+{
+    uint8_t mac_addr[6];
+    if (esp_read_mac(mac_addr, ESP_MAC_BT) == ESP_OK) {
+        // Manufacturer Data 格式:
+        // [0-1]: Company ID (0xFFF0 用于测试/自定义)
+        // [2-7]: MAC Address (6 bytes)
+        g_manufacturer_data[0] = 0xF0;  // Company ID 低字节
+        g_manufacturer_data[1] = 0xFF;  // Company ID 高字节
+        memcpy(&g_manufacturer_data[2], mac_addr, 6);  // MAC地址
+
+        // 配置广播数据
+        esp_ble_adv_data_t adv_data = {};
+        adv_data.set_scan_rsp = false;
+        adv_data.include_name = true;          // 包含设备名称
+        adv_data.include_txpower = false;      // 不包含发射功率
+        adv_data.min_interval = 0x0006;        // 最小广播间隔 (7.5ms)
+        adv_data.max_interval = 0x0010;        // 最大广播间隔 (10ms)
+        adv_data.appearance = 0x00;            // 外观
+        adv_data.manufacturer_len = sizeof(g_manufacturer_data);
+        adv_data.p_manufacturer_data = g_manufacturer_data;
+        adv_data.flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT);
+
+        char mac_str_for_name[13]; // 6 bytes * 2 chars + 1 null terminator
+        sprintf(mac_str_for_name, "%02X%02X%02X%02X%02X%02X",
+                mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+
+        g_device_name = std::string(mac_str_for_name);
+        esp_ble_gap_set_device_name(g_device_name.c_str());
+        ESP_LOGI(TAG, "BLE device name set to: %s", g_device_name.c_str());
+        ESP_LOGI(TAG, "📱 Manufacturer Data configured:");
+        ESP_LOGI(TAG, "   Company ID: 0xFFF0");
+        ESP_LOGI(TAG, "   MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
+                mac_addr[0], mac_addr[1], mac_addr[2],
+                mac_addr[3], mac_addr[4], mac_addr[5]);
+
+        esp_err_t ret = esp_ble_gap_config_adv_data(&adv_data);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "❌ Failed to config advertising data: %s", esp_err_to_name(ret));
+        }
+    } else {
+        ESP_LOGE(TAG, "❌ Failed to read BT MAC address for Manufacturer Data");
+    }
+}
 
 static void blufi_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *param) {
     ESP_LOGI(TAG, "Blufi event: %d", event);
     switch (event) {
     case ESP_BLUFI_EVENT_INIT_FINISH:
         ESP_LOGI(TAG, "BLUFI init finish");
-        // 在广播启动前设置设备名称
-        if (!g_device_name.empty()) {
-            esp_err_t name_ret = esp_ble_gap_set_device_name(g_device_name.c_str());
-            if (name_ret) {
-                ESP_LOGE(TAG, "Set device name in INIT_FINISH failed: %s", esp_err_to_name(name_ret));
-            } else {
-                ESP_LOGI(TAG, "Device name set to %s in INIT_FINISH", g_device_name.c_str());
-            }
-        }
-        esp_blufi_adv_start();
+        esp_blufi_adv_start(g_device_name.c_str());
         break;
     case ESP_BLUFI_EVENT_DEINIT_FINISH:
         ESP_LOGI(TAG, "BLUFI deinit finish");
@@ -155,7 +197,7 @@ static void blufi_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_param_
         ESP_LOGI(TAG, "BLUFI ble disconnect");
         ble_is_connected = false;
         blufi_security_deinit();
-        esp_blufi_adv_start();
+        esp_blufi_adv_start(g_device_name.c_str());
         break;
     case ESP_BLUFI_EVENT_SET_WIFI_OPMODE:
         ESP_LOGI(TAG, "BLUFI Set WIFI opmode %d", param->wifi_mode.op_mode);
