@@ -90,6 +90,7 @@ private:
     // 音乐播放管理
     std::unique_ptr<MusicPlaylistManager> music_playlist_manager_;
     esp_timer_handle_t music_status_timer_ = nullptr;
+    bool music_is_stopped_ = true;  // 音乐停止状态标记
 
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);

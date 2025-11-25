@@ -24,6 +24,7 @@ public:
     virtual bool IsPlaying() const = 0;
     virtual bool IsPaused() const = 0;
     virtual int16_t* GetAudioData() = 0;
+    virtual int GetCurrentPositionSeconds() const = 0;  // 获取当前播放位置(秒)
 
     // MCP工具需要的方法
     virtual bool PlaySong() = 0;

@@ -1013,6 +1013,7 @@ bool Esp32Music::ResumeSong() {
     // 清除暂停标志
     is_paused_ = false;
     is_waiting_ = true;
+    is_automated_ = true;
     ESP_LOGI(TAG, "Music playback resumed");
     
     // 更新显示状态

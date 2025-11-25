@@ -985,6 +985,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
         if (current_item != nullptr) {
             ESP_LOGI(TAG, "Starting playback: %s", current_item->resource_name.c_str());
             if (music->StartStreaming(current_item->url)) {
+                music_is_stopped_ = false;  // 新播放列表开始播放，清除停止标记
                 StartMusicStatusTimer();
                 SendMusicStatus(true);  // 立即发送开始播放状态
             } else {
@@ -1005,6 +1006,7 @@ void Application::HandleMusicControl(const std::string& action) {
     ESP_LOGI(TAG, "Music control: %s", action.c_str());
 
     if (action == "play") {
+        music_is_stopped_ = false;  // 开始播放，清除停止标记
         music->PlaySong();
         SendMusicStatus(true);
     } else if (action == "pause") {
@@ -1015,8 +1017,9 @@ void Application::HandleMusicControl(const std::string& action) {
         SendMusicStatus(true);
     } else if (action == "stop") {
         music->StopSong();
+        music_is_stopped_ = true;  // 设置停止标记
         StopMusicStatusTimer();
-        SendMusicStatus(true);
+        SendMusicStatus(true);  // 发送一次停止状态后，后续不再发送
     } else if (action == "next") {
         // 手动切换下一曲 - 不受播放模式限制
         const MusicItem* next_item = music_playlist_manager_->ManualNext();
@@ -1025,6 +1028,7 @@ void Application::HandleMusicControl(const std::string& action) {
                      next_item->resource_name.c_str(), next_item->item_id);
             music->StopStreaming();
             if (music->StartStreaming(next_item->url)) {
+                music_is_stopped_ = false;  // 切歌后清除停止标记
                 SendMusicStatus(true);
             }
         } else {
@@ -1038,6 +1042,7 @@ void Application::HandleMusicControl(const std::string& action) {
                      prev_item->resource_name.c_str(), prev_item->item_id);
             music->StopStreaming();
             if (music->StartStreaming(prev_item->url)) {
+                music_is_stopped_ = false;  // 切歌后清除停止标记
                 SendMusicStatus(true);
             }
         } else {
@@ -1077,15 +1082,18 @@ void Application::OnMusicSongFinished() {
         if (music != nullptr) {
             music->SetAutomated(true);
             if (music->StartStreaming(next_item->url)) {
+                music_is_stopped_ = false;  // 自动播放下一曲，清除停止标记
                 SendMusicStatus(true);  // 发送新歌曲开始状态
             } else {
                 ESP_LOGE(TAG, "Failed to start next item");
+                music_is_stopped_ = true;  // 播放失败，设置停止标记
                 StopMusicStatusTimer();
                 SendMusicStatus(true);
             }
         }
     } else {
         ESP_LOGI(TAG, "No more items, playlist finished");
+        music_is_stopped_ = true;  // 播放列表结束，设置停止标记
         StopMusicStatusTimer();
         SendMusicStatus(true);  // 发送播放结束状态
     }
@@ -1095,6 +1103,11 @@ void Application::SendMusicStatus(bool force) {
     auto& board = Board::GetInstance();
     auto music = board.GetMusic();
     if (music == nullptr) {
+        return;
+    }
+
+    // 如果音乐已停止且不是强制发送，则不再发送状态消息
+    if (music_is_stopped_ && !force) {
         return;
     }
 
@@ -1116,13 +1129,17 @@ void Application::SendMusicStatus(bool force) {
     }
 
     // 播放状态: 0=停止, 1=播放中, 2=暂停
+    // 修复逻辑：暂停时不应该设置为播放中
     int play_status = 0;
-    if (music->IsPlaying()) {
-        play_status = 1;
-    } else if (music->IsPaused()) {
-        play_status = 2;
+    if (music->IsPaused()) {
+        play_status = 2;  // 暂停优先判断
+    } else if (music->IsPlaying()) {
+        play_status = 1;  // 播放中
     }
     cJSON_AddNumberToObject(status, "play_status", play_status);
+
+    // 添加当前播放位置（秒）
+    cJSON_AddNumberToObject(status, "position", music->GetCurrentPositionSeconds());
 
     cJSON_AddNumberToObject(status, "play_mode", music_playlist_manager_->GetPlayMode());
     cJSON_AddNumberToObject(status, "play_type", music_playlist_manager_->GetPlayType());

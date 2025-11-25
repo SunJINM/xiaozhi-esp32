@@ -94,7 +94,8 @@ public:
     virtual bool IsPlaying() const override { return is_playing_; }
     virtual bool IsPaused() const override { return is_paused_; }
     virtual int16_t* GetAudioData() override { return final_pcm_data_fft; }
-    
+    virtual int GetCurrentPositionSeconds() const override { return static_cast<int>(current_play_time_ms_ / 1000); }
+
     // 显示模式控制方法
     void SetDisplayMode(DisplayMode mode);
     DisplayMode GetDisplayMode() const { return display_mode_.load(); }
