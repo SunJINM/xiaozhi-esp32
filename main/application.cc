@@ -269,6 +269,9 @@ void Application::ToggleChatState() {
             auto music = Board::GetInstance().GetMusic();
             if (music->IsPlaying()) {
                 music->StopSong();
+                music_is_stopped_ = true;
+                StopMusicStatusTimer();
+                SendMusicStatus(true);
             }
         });
     } else if (device_state_ == kDeviceStateListening) {
