@@ -37,7 +37,8 @@ static bool ble_is_connected = false;
 static wifi_config_t sta_config;
 
 // Manufacturer Data for iOS MAC address accessibility
-static uint8_t g_manufacturer_data[8];
+// Format: [0-1] Company ID (0xFFF0), [2-18] MAC string "XX:XX:XX:XX:XX:XX"
+static uint8_t g_manufacturer_data[19];
 
 
 // Forward declaration for Blufi callback
@@ -136,12 +137,18 @@ void esp_blufi_adv_start(const char *name)
 {
     uint8_t mac_addr[6];
     if (esp_read_mac(mac_addr, ESP_MAC_BT) == ESP_OK) {
+        // 格式化MAC地址为大写带冒号格式: "XX:XX:XX:XX:XX:XX"
+        char mac_str[18];
+        sprintf(mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+
         // Manufacturer Data 格式:
         // [0-1]: Company ID (0xFFF0 用于测试/自定义)
-        // [2-7]: MAC Address (6 bytes)
+        // [2-18]: MAC地址字符串 "XX:XX:XX:XX:XX:XX" (17字节 + null terminator)
         g_manufacturer_data[0] = 0xF0;  // Company ID 低字节
         g_manufacturer_data[1] = 0xFF;  // Company ID 高字节
-        memcpy(&g_manufacturer_data[2], mac_addr, 6);  // MAC地址
+        memcpy(&g_manufacturer_data[2], mac_str, 17);  // MAC地址字符串（不包含null terminator）
+        g_manufacturer_data[18] = '\0';  // 确保字符串结束
 
         // 配置广播数据
         esp_ble_adv_data_t adv_data = {};
@@ -151,22 +158,17 @@ void esp_blufi_adv_start(const char *name)
         adv_data.min_interval = 0x0006;        // 最小广播间隔 (7.5ms)
         adv_data.max_interval = 0x0010;        // 最大广播间隔 (10ms)
         adv_data.appearance = 0x00;            // 外观
-        adv_data.manufacturer_len = sizeof(g_manufacturer_data);
+        adv_data.manufacturer_len = 19;        // Company ID (2) + MAC string (17)
         adv_data.p_manufacturer_data = g_manufacturer_data;
         adv_data.flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT);
 
-        char mac_str_for_name[13]; // 6 bytes * 2 chars + 1 null terminator
-        sprintf(mac_str_for_name, "%02X%02X%02X%02X%02X%02X",
-                mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-
-        g_device_name = std::string(mac_str_for_name);
-        esp_ble_gap_set_device_name(g_device_name.c_str());
-        ESP_LOGI(TAG, "BLE device name set to: %s", g_device_name.c_str());
+        // 使用已初始化的g_device_name（在EnterWifiConfigMode中设置）
+        std::string device_name = std::string(mac_str);
+        esp_ble_gap_set_device_name(device_name.c_str());
+        ESP_LOGI(TAG, "BLE device name: %s (length: %d)", device_name.c_str(), device_name.length());
         ESP_LOGI(TAG, "📱 Manufacturer Data configured:");
         ESP_LOGI(TAG, "   Company ID: 0xFFF0");
-        ESP_LOGI(TAG, "   MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
-                mac_addr[0], mac_addr[1], mac_addr[2],
-                mac_addr[3], mac_addr[4], mac_addr[5]);
+        ESP_LOGI(TAG, "   MAC Address: %s", mac_str);
 
         esp_err_t ret = esp_ble_gap_config_adv_data(&adv_data);
         if (ret != ESP_OK) {
@@ -313,12 +315,14 @@ void WifiBoard::EnterWifiConfigMode() {
             display->ShowQrCode(g_device_name.c_str());
         }
     } else {
-        char mac_str_for_name[13]; // 6 bytes * 2 chars + 1 null terminator
-        sprintf(mac_str_for_name, "%02X%02X%02X%02X%02X%02X",
-                mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+        // 设备名称格式: "XZ_" + 后4个MAC字节
+        // 例如: "XZ_A1B2C3D4" (总长度11，符合BLE设备名称限制)
+        char mac_str_for_name[9]; // 4 bytes * 2 chars + 1 null terminator
+        sprintf(mac_str_for_name, "%02X%02X%02X%02X",
+                mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 
-        g_device_name = "XIAOZHI_" + std::string(mac_str_for_name);
-        ESP_LOGI(TAG, "Will set device name to %s", g_device_name.c_str());
+        g_device_name = "XZ_" + std::string(mac_str_for_name);
+        ESP_LOGI(TAG, "Will set device name to %s (length: %d)", g_device_name.c_str(), g_device_name.length());
 
         char mac_str_for_qr[18];
         sprintf(mac_str_for_qr, "%02X:%02X:%02X:%02X:%02X:%02X",
