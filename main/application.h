@@ -107,6 +107,10 @@ private:
     void StartMusicStatusTimer();
     void StopMusicStatusTimer();
     static void MusicStatusTimerCallback(void* arg);
+
+    // 设备状态相关
+    void SendDeviceStatus();
+    void OnChargingStatusChanged(bool is_charging);
 };
 
 #endif // _APPLICATION_H_

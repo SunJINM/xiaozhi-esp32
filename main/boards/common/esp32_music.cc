@@ -290,6 +290,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
     
     // 开始播放线程（会等待缓冲区有足够数据）
     is_playing_ = true;
+    is_paused_ = false;
     play_thread_ = std::thread(&Esp32Music::PlayAudioStream, this);
     
     ESP_LOGI(TAG, "Streaming threads started successfully");

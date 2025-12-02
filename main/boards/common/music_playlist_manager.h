@@ -23,12 +23,13 @@ enum PlayType {
 struct MusicItem {
     int item_id;               // 明细ID
     std::string url;           // 资源URL
+    int resource_id;           // 资源ID
     std::string resource_name; // 资源名称
     int duration;              // 时长(秒)
 
-    MusicItem() : item_id(0), duration(0) {}
-    MusicItem(int id, const std::string& url_str, const std::string& name, int dur)
-        : item_id(id), url(url_str), resource_name(name), duration(dur) {}
+    MusicItem() : item_id(0), resource_id(0), duration(0) {}
+    MusicItem(int id, const std::string& url_str, int resource_id, const std::string& name, int dur)
+        : item_id(id), url(url_str), resource_id(resource_id), resource_name(name), duration(dur) {}
 };
 
 class MusicPlaylistManager {

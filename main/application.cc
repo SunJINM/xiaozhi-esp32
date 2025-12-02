@@ -15,7 +15,7 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
-
+#include <wifi_station.h>
 #define TAG "Application"
 
 
@@ -381,6 +381,11 @@ void Application::Start() {
         });
     }
 
+    /* Setup charging status callback */
+    board.OnChargingStatusChanged([this](bool is_charging) {
+        OnChargingStatusChanged(is_charging);
+    });
+
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
@@ -437,6 +442,12 @@ void Application::Start() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
+        });
+    });
+    protocol_->OnDisconnected([this]() {
+        Schedule([this]() {
+            ESP_LOGI(TAG, "WebSocket disconnected, stopping music status timer");
+            StopMusicStatusTimer();
         });
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
@@ -537,6 +548,23 @@ void Application::Start() {
             } else {
                 ESP_LOGW(TAG, "Invalid music message format: missing data");
             }
+        } else if (strcmp(type->valuestring, "ping") == 0) {
+            // 响应ping消息，返回pong
+            ESP_LOGI(TAG, "Received ping, sending pong");
+            cJSON* pong_message = cJSON_CreateObject();
+            cJSON_AddStringToObject(pong_message, "type", "pong");
+            char* pong_str = cJSON_PrintUnformatted(pong_message);
+            if (pong_str != nullptr) {
+                protocol_->SendJson(pong_str);
+                free(pong_str);
+            }
+            cJSON_Delete(pong_message);
+        } else if (strcmp(type->valuestring, "device_status") == 0) {
+            // 返回设备状态信息（电量、音量、网络）
+            ESP_LOGI(TAG, "Received device_status request");
+            Schedule([this]() {
+                SendDeviceStatus();
+            });
         } else {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
         }
@@ -957,6 +985,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
         cJSON* item = cJSON_GetArrayItem(items, i);
         auto item_id = cJSON_GetObjectItem(item, "item_id");
         auto url = cJSON_GetObjectItem(item, "url");
+        auto resource_id = cJSON_GetObjectItem(item, "resource_id");
         auto resource_name = cJSON_GetObjectItem(item, "resource_name");
         auto duration = cJSON_GetObjectItem(item, "duration");
 
@@ -965,6 +994,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
             MusicItem music_item(
                 item_id->valueint,
                 url->valuestring,
+                resource_id->valueint,
                 resource_name->valuestring,
                 duration->valueint
             );
@@ -984,11 +1014,13 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
     auto& board = Board::GetInstance();
     auto music = board.GetMusic();
     if (music != nullptr) {
+        AbortSpeaking(kAbortReasonNone);
         const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
         if (current_item != nullptr) {
             ESP_LOGI(TAG, "Starting playback: %s", current_item->resource_name.c_str());
             if (music->StartStreaming(current_item->url)) {
                 music_is_stopped_ = false;  // 新播放列表开始播放，清除停止标记
+                music->SetAutomated(false);
                 StartMusicStatusTimer();
                 SendMusicStatus(true);  // 立即发送开始播放状态
             } else {
@@ -1014,9 +1046,12 @@ void Application::HandleMusicControl(const std::string& action) {
         SendMusicStatus(true);
     } else if (action == "pause") {
         music->PauseSong();
+        StopMusicStatusTimer();
         SendMusicStatus(true);
+        SetDeviceState(kDeviceStateListening);
     } else if (action == "resume") {
         music->ResumeSong();
+        StartMusicStatusTimer();
         SendMusicStatus(true);
     } else if (action == "stop") {
         music->StopSong();
@@ -1123,10 +1158,12 @@ void Application::SendMusicStatus(bool force) {
 
     if (current_item != nullptr) {
         cJSON_AddNumberToObject(status, "item_id", current_item->item_id);
+        cJSON_AddNumberToObject(status, "resource_id", current_item->resource_id);
         cJSON_AddStringToObject(status, "resource_name", current_item->resource_name.c_str());
         cJSON_AddNumberToObject(status, "duration", current_item->duration);
     } else {
         cJSON_AddNumberToObject(status, "item_id", 0);
+        cJSON_AddNumberToObject(status, "resource_id", 0);
         cJSON_AddStringToObject(status, "resource_name", "");
         cJSON_AddNumberToObject(status, "duration", 0);
     }
@@ -1204,5 +1241,55 @@ void Application::MusicStatusTimerCallback(void* arg) {
     Application* app = static_cast<Application*>(arg);
     app->Schedule([app]() {
         app->SendMusicStatus(false);
+    });
+}
+
+void Application::SendDeviceStatus() {
+    auto& board = Board::GetInstance();
+    cJSON* status = cJSON_CreateObject();
+
+    // 音量信息
+    auto audio_codec = board.GetAudioCodec();
+    if (audio_codec) {
+        cJSON_AddNumberToObject(status, "volume", audio_codec->output_volume());
+    }
+
+    // 电量信息
+    int battery_level = 0;
+    bool charging = false;
+    bool discharging = false;
+    if (board.GetBatteryLevel(battery_level, charging, discharging)) {
+        cJSON* battery = cJSON_CreateObject();
+        cJSON_AddNumberToObject(battery, "level", battery_level);
+        cJSON_AddBoolToObject(battery, "charging", charging);
+        cJSON_AddItemToObject(status, "battery", battery);
+    }
+
+    // 网络信息
+    auto& wifi_station = WifiStation::GetInstance();
+    cJSON* network = cJSON_CreateObject();
+    cJSON_AddStringToObject(network, "type", "wifi");
+    cJSON_AddStringToObject(network, "ssid", wifi_station.GetSsid().c_str());
+    cJSON_AddNumberToObject(network, "rssi", wifi_station.GetRssi());
+    cJSON_AddItemToObject(status, "network", network);
+
+    // 构建完整消息
+    cJSON* message = cJSON_CreateObject();
+    cJSON_AddStringToObject(message, "type", "device_status");
+    cJSON_AddItemToObject(message, "data", status);
+
+    char* message_str = cJSON_PrintUnformatted(message);
+    if (message_str != nullptr) {
+        ESP_LOGI(TAG, "Sending device status: %s", message_str);
+        protocol_->SendJson(message_str);
+        free(message_str);
+    }
+    cJSON_Delete(message);
+}
+
+void Application::OnChargingStatusChanged(bool is_charging) {
+    ESP_LOGI(TAG, "Charging status changed: %s", is_charging ? "charging" : "not charging");
+    Schedule([this]() {
+        SendDeviceStatus();
     });
 }

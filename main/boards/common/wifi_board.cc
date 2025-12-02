@@ -139,7 +139,7 @@ void esp_blufi_adv_start(const char *name)
     if (esp_read_mac(mac_addr, ESP_MAC_BT) == ESP_OK) {
         // 格式化MAC地址为大写带冒号格式: "XX:XX:XX:XX:XX:XX"
         char mac_str[18];
-        sprintf(mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+        sprintf(mac_str, "%02x:%02x:%02x:%02x:%02x:%02x",
                 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 
         // Manufacturer Data 格式:
@@ -315,22 +315,20 @@ void WifiBoard::EnterWifiConfigMode() {
             display->ShowQrCode(g_device_name.c_str());
         }
     } else {
-        // 设备名称格式: "XZ_" + 后4个MAC字节
-        // 例如: "XZ_A1B2C3D4" (总长度11，符合BLE设备名称限制)
-        char mac_str_for_name[9]; // 4 bytes * 2 chars + 1 null terminator
-        sprintf(mac_str_for_name, "%02X%02X%02X%02X",
-                mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-
-        g_device_name = "XZ_" + std::string(mac_str_for_name);
-        ESP_LOGI(TAG, "Will set device name to %s (length: %d)", g_device_name.c_str(), g_device_name.length());
+        uint8_t mac[6];
+        esp_wifi_get_mac(WIFI_IF_STA, mac);
+        char mac_str[18];
+        sprintf(mac_str, "%02x:%02x:%02x:%02x:%02x:%02x",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
         char mac_str_for_qr[18];
-        sprintf(mac_str_for_qr, "%02X:%02X:%02X:%02X:%02X:%02X",
+        sprintf(mac_str_for_qr, "%02x:%02x:%02x:%02x:%02x:%02x",
                 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-        ESP_LOGI(TAG, "Bluetooth MAC address: %s", mac_str_for_qr);
-
         // Combine device name and MAC address for QR code
-        std::string qr_data = "deviceName=" + g_device_name + "&mac=" + mac_str_for_qr;
+        std::string qr_data = std::string("blu_mac=") + std::string(mac_str_for_qr) + "&wifi_mac=" + std::string(mac_str);
+
+        ESP_LOGI(TAG, "qr data: %s", qr_data);
+
         auto display = Board::GetInstance().GetDisplay();
         if (display) {
             display->ShowQrCode(qr_data.c_str());
@@ -355,10 +353,10 @@ void WifiBoard::EnterWifiConfigMode() {
 
         if (bits & CONNECTED_BIT) {
             ESP_LOGI(TAG, "BluFi configuration successful, Wi-Fi connected.");
-                        uint8_t mac[6];
+            uint8_t mac[6];
             esp_wifi_get_mac(WIFI_IF_STA, mac);
             char mac_str[18];
-            sprintf(mac_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+            sprintf(mac_str, "%02x:%02x:%02x:%02x:%02x:%02x",
                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
             // Send success response: status=0

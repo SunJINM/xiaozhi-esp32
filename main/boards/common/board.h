@@ -55,6 +55,7 @@ public:
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+    virtual void OnChargingStatusChanged(std::function<void(bool)> callback) {}  // 默认空实现
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \
