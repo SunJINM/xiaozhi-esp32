@@ -129,7 +129,10 @@ static std::string url_encode(const std::string& str) {
 Esp32Music::Esp32Music() : last_downloaded_data_(), current_music_url_(), current_song_name_(),
                          song_name_displayed_(false),
                          display_mode_(DISPLAY_MODE_LYRICS), is_playing_(false), is_downloading_(false),
-                         is_paused_(false), play_thread_(), download_thread_(), audio_buffer_(), buffer_mutex_(),
+                         is_paused_(false), play_thread_(), download_thread_(),
+                         current_play_time_ms_(0), last_frame_time_ms_(0), total_frames_decoded_(0),
+                         skip_to_position_ms_(0),
+                         audio_buffer_(), buffer_mutex_(),
                          buffer_cv_(), buffer_size_(0), mp3_decoder_(nullptr), mp3_frame_info_(),
                          mp3_decoder_initialized_(false), on_song_finished_(nullptr), on_error_(nullptr) {
     ESP_LOGI(TAG, "Music player initialized with default spectrum display mode");
@@ -375,6 +378,29 @@ bool Esp32Music::StopStreaming() {
     
     ESP_LOGI(TAG, "Music streaming stop signal sent");
     return true;
+}
+
+// 从指定位置开始流式播放
+bool Esp32Music::StartStreamingFromPosition(const std::string& music_url, int64_t position_ms) {
+    if (music_url.empty()) {
+        ESP_LOGE(TAG, "Music URL is empty");
+        return false;
+    }
+
+    // ESP_LOGI(TAG, "Starting streaming from position: %d ms, URL: %s",
+    //          (int64_t)position_ms, music_url.c_str());
+
+    // 设置跳转目标位置
+    skip_to_position_ms_ = position_ms;
+
+    // 调用普通的StartStreaming，播放线程会处理跳转
+    bool result = StartStreaming(music_url);
+
+    if (!result) {
+        skip_to_position_ms_ = 0;  // 启动失败，重置跳转标志
+    }
+
+    return result;
 }
 
 // 流式下载音频数据
@@ -708,16 +734,29 @@ void Esp32Music::PlayAudioStream() {
             }
             
             // 计算当前帧的持续时间(毫秒)
-            int frame_duration_ms = (mp3_frame_info_.outputSamps * 1000) / 
+            int frame_duration_ms = (mp3_frame_info_.outputSamps * 1000) /
                                   (mp3_frame_info_.samprate * mp3_frame_info_.nChans);
-            
+
             // 更新当前播放时间
             current_play_time_ms_ += frame_duration_ms;
-            
-            ESP_LOGD(TAG, "Frame %d: time=%lldms, duration=%dms, rate=%d, ch=%d", 
+
+            // 如果需要跳转到指定位置，解码但不播放
+            if (skip_to_position_ms_ > 0 && current_play_time_ms_ < skip_to_position_ms_) {
+                // 跳过这一帧，继续解码下一帧
+                ESP_LOGD(TAG, "Skipping frame: current=%lld ms, target=%lld ms",
+                        (long long)current_play_time_ms_, (long long)skip_to_position_ms_);
+                continue;
+            } else if (skip_to_position_ms_ > 0 && current_play_time_ms_ >= skip_to_position_ms_) {
+                // 已到达目标位置，清除跳转标志
+                ESP_LOGI(TAG, "Reached target position: %lld ms (actual: %lld ms)",
+                        (long long)skip_to_position_ms_, (long long)current_play_time_ms_);
+                skip_to_position_ms_ = 0;
+            }
+
+            ESP_LOGD(TAG, "Frame %d: time=%lldms, duration=%dms, rate=%d, ch=%d",
                     total_frames_decoded_, current_play_time_ms_, frame_duration_ms,
                     mp3_frame_info_.samprate, mp3_frame_info_.nChans);
-            
+
             // 将PCM数据发送到Application的音频解码队列
             if (mp3_frame_info_.outputSamps > 0) {
                 int16_t* final_pcm_data = pcm_buffer;
@@ -967,31 +1006,32 @@ bool Esp32Music::StopSong() {
 
 bool Esp32Music::PauseSong() {
     ESP_LOGI(TAG, "PauseSong called");
-    
-    // 检查是否正在播放
-    if (!is_playing_) {
-        ESP_LOGW(TAG, "No music is currently playing");
-        return false;
-    }
-    
-    // 检查是否已经暂停
-    if (is_paused_) {
-        ESP_LOGW(TAG, "Music is already paused");
-        return true;
-    }
-    
-    // 设置暂停标志
     is_paused_ = true;
-    ESP_LOGI(TAG, "Music playback paused");
     
-    // 更新显示状态
-    auto& board = Board::GetInstance();
-    auto display = board.GetDisplay();
-    if (display && !current_song_name_.empty()) {
-        std::string formatted_song_name = "《" + current_song_name_ + "》已暂停";
-        display->SetMusicInfo(formatted_song_name.c_str());
-        ESP_LOGI(TAG, "Updated display: %s", formatted_song_name.c_str());
-    }
+    // // 检查是否正在播放
+    // if (!is_playing_) {
+    //     ESP_LOGW(TAG, "No music is currently playing");
+    //     return false;
+    // }
+    
+    // // 检查是否已经暂停
+    // if (is_paused_) {
+    //     ESP_LOGW(TAG, "Music is already paused");
+    //     return true;
+    // }
+    
+    // // 设置暂停标志
+    // is_paused_ = true;
+    // ESP_LOGI(TAG, "Music playback paused");
+    
+    // // 更新显示状态
+    // auto& board = Board::GetInstance();
+    // auto display = board.GetDisplay();
+    // if (display && !current_song_name_.empty()) {
+    //     std::string formatted_song_name = "《" + current_song_name_ + "》已暂停";
+    //     display->SetMusicInfo(formatted_song_name.c_str());
+    //     ESP_LOGI(TAG, "Updated display: %s", formatted_song_name.c_str());
+    // }
     
     return true;
 }

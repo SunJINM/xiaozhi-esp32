@@ -19,12 +19,17 @@ public:
     // 新增流式播放相关方法
     virtual bool StartStreaming(const std::string& music_url) = 0;
     virtual bool StopStreaming() = 0;  // 停止流式播放
+    virtual bool StartStreamingFromPosition(const std::string& music_url, int64_t position_ms) {
+        // 默认实现：忽略位置参数，调用普通的StartStreaming
+        return StartStreaming(music_url);
+    }
     virtual size_t GetBufferSize() const = 0;
     virtual bool IsDownloading() const = 0;
     virtual bool IsPlaying() const = 0;
     virtual bool IsPaused() const = 0;
     virtual int16_t* GetAudioData() = 0;
     virtual int GetCurrentPositionSeconds() const = 0;  // 获取当前播放位置(秒)
+    virtual int GetCurrentPositionMilliseconds() const = 0;
 
     // MCP工具需要的方法
     virtual bool PlaySong() = 0;

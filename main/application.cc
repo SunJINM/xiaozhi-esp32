@@ -605,6 +605,9 @@ void Application::MainEventLoop() {
     // Raise the priority of the main event loop to avoid being interrupted by background tasks (which has priority 2)
     vTaskPrioritySet(NULL, 3);
 
+    // 记录主事件循环运行的CPU核心
+    ESP_LOGI(TAG, "Main event loop running on Core %d with priority 3", xPortGetCoreID());
+
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, MAIN_EVENT_SCHEDULE |
             MAIN_EVENT_SEND_AUDIO |
@@ -857,6 +860,7 @@ void Application::PlaySound(const std::string_view& sound) {
 // 新增：接收外部音频数据（如音乐播放）
 void Application::AddAudioData(AudioStreamPacket&& packet) {
     auto codec = Board::GetInstance().GetAudioCodec();
+    ESP_LOGI(TAG, "AddAudioData: device_state=%d, output_enabled=%d", device_state_, codec->output_enabled());
     if (device_state_ == kDeviceStateSpeaking && codec->output_enabled()) {
         // packet.payload包含的是原始PCM数据（int16_t）
         if (packet.payload.size() >= 2) {
@@ -1045,14 +1049,55 @@ void Application::HandleMusicControl(const std::string& action) {
         music->PlaySong();
         SendMusicStatus(true);
     } else if (action == "pause") {
+        // 保存断点信息
+        const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
+        if (current_item != nullptr) {
+            int64_t position_ms = static_cast<int64_t>(music->GetCurrentPositionMilliseconds());
+            music_playlist_manager_->SaveCheckpoint(
+                current_item->url,
+                current_item->item_id,
+                position_ms
+            );
+            ESP_LOGI(TAG, "Checkpoint saved: item_id=%d, position=%lld ms",
+                     current_item->item_id, (long long)position_ms);
+        }
+
+        // 停止播放（完全停止，线程退出）
+        music->StopSong();
         music->PauseSong();
+        music_is_stopped_ = true;
         StopMusicStatusTimer();
         SendMusicStatus(true);
-        SetDeviceState(kDeviceStateListening);
+
+        // 切换到 listening 状态，等待用户输入
+        Schedule([this]() {
+            SetDeviceState(kDeviceStateListening);
+        });
     } else if (action == "resume") {
-        music->ResumeSong();
-        StartMusicStatusTimer();
-        SendMusicStatus(true);
+        // 从断点恢复播放
+        if (music_playlist_manager_->HasCheckpoint()) {
+            const auto& checkpoint = music_playlist_manager_->GetCheckpoint();
+            ESP_LOGI(TAG, "Resuming from checkpoint: item_id=%d, position=%d ms",
+                     checkpoint.item_id, (int64_t)checkpoint.position_ms);
+
+            // 重新启动流式播放，从断点位置开始
+            if (music->StartStreamingFromPosition(checkpoint.url, checkpoint.position_ms)) {
+                music_is_stopped_ = false;
+                StartMusicStatusTimer();
+                SendMusicStatus(true);
+
+                // 清除断点
+                music_playlist_manager_->ClearCheckpoint();
+            } else {
+                ESP_LOGE(TAG, "Failed to resume from checkpoint");
+            }
+        } else {
+            // 没有断点信息，尝试普通恢复（兼容旧逻辑）
+            ESP_LOGW(TAG, "No checkpoint available, trying normal resume");
+            music->ResumeSong();
+            StartMusicStatusTimer();
+            SendMusicStatus(true);
+        }
     } else if (action == "stop") {
         music->StopSong();
         music_is_stopped_ = true;  // 设置停止标记

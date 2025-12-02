@@ -32,6 +32,18 @@ struct MusicItem {
         : item_id(id), url(url_str), resource_id(resource_id), resource_name(name), duration(dur) {}
 };
 
+// 播放断点信息结构
+struct PlaybackCheckpoint {
+    std::string url;           // 播放URL
+    int item_id;               // 歌曲ID
+    int64_t position_ms;       // 播放位置(毫秒)
+    int64_t timestamp_ms;      // 保存时间戳(毫秒)
+    bool valid;                // 断点是否有效
+
+    PlaybackCheckpoint()
+        : item_id(0), position_ms(0), timestamp_ms(0), valid(false) {}
+};
+
 class MusicPlaylistManager {
 public:
     MusicPlaylistManager();
@@ -79,6 +91,12 @@ public:
         on_song_finished_ = callback;
     }
 
+    // 断点管理
+    void SaveCheckpoint(const std::string& url, int item_id, int64_t position_ms);
+    const PlaybackCheckpoint& GetCheckpoint() const { return checkpoint_; }
+    bool HasCheckpoint() const { return checkpoint_.valid; }
+    void ClearCheckpoint();
+
 private:
     // 随机播放辅助方法
     const MusicItem* GetNextRandomItem();
@@ -90,6 +108,7 @@ private:
     PlayMode play_mode_;                       // 播放模式
     PlayType play_type_;                       // 播放类型
     int current_index_;                        // 当前播放索引
+    PlaybackCheckpoint checkpoint_;            // 播放断点信息
     mutable std::mutex mutex_;                 // 线程安全 (mutable允许在const方法中使用)
     std::function<void()> on_song_finished_;   // 歌曲完成回调
 };

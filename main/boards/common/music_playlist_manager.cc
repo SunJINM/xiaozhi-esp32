@@ -1,4 +1,5 @@
 #include "music_playlist_manager.h"
+#include "system_info.h"
 #include <esp_log.h>
 #include <esp_random.h>
 #include <algorithm>
@@ -297,4 +298,31 @@ const MusicItem* MusicPlaylistManager::GetNextRandomItem() {
 
     ESP_LOGI(TAG, "GetNextRandomItem: Random selected index=%d", current_index_);
     return &playlist_[current_index_];
+}
+
+// ============================================================
+// 断点管理
+// ============================================================
+
+void MusicPlaylistManager::SaveCheckpoint(const std::string& url, int item_id, int64_t position_ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    checkpoint_.url = url;
+    checkpoint_.item_id = item_id;
+    checkpoint_.position_ms = position_ms;
+    checkpoint_.timestamp_ms = esp_timer_get_time() / 1000;  // 当前时间(毫秒)
+    checkpoint_.valid = true;
+
+    ESP_LOGI(TAG, "Checkpoint saved: item_id=%d, position=%lld ms",
+             item_id, (long long)position_ms);
+}
+
+void MusicPlaylistManager::ClearCheckpoint() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    checkpoint_.valid = false;
+    checkpoint_.url.clear();
+    checkpoint_.item_id = 0;
+    checkpoint_.position_ms = 0;
+    checkpoint_.timestamp_ms = 0;
+
+    ESP_LOGI(TAG, "Checkpoint cleared");
 }
