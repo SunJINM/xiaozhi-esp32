@@ -52,6 +52,7 @@ private:
     int64_t last_frame_time_ms_;    // 上一帧的时间戳
     int total_frames_decoded_;      // 已解码的帧数
     int64_t skip_to_position_ms_;   // 需要跳转到的位置(毫秒)，0表示不跳转
+    std::atomic<size_t> downloaded_bytes_;  // 已下载的字节数
 
     // 音频缓冲区
     std::queue<AudioChunk> audio_buffer_;
@@ -67,7 +68,7 @@ private:
     bool mp3_decoder_initialized_;
     
     // 私有方法
-    void DownloadAudioStream(const std::string& music_url);
+    void DownloadAudioStream(const std::string& music_url, size_t start_byte = 0);
     void PlayAudioStream();
     void ClearAudioBuffer();
     bool InitializeMp3Decoder();
@@ -91,6 +92,7 @@ public:
     virtual bool StartStreaming(const std::string& music_url) override;
     virtual bool StopStreaming() override;  // 停止流式播放
     bool StartStreamingFromPosition(const std::string& music_url, int64_t position_ms);  // 从指定位置开始播放
+    bool StartStreamingFromByteOffset(const std::string& music_url, size_t byte_offset);  // 从字节偏移开始播放
     virtual size_t GetBufferSize() const override { return buffer_size_; }
     virtual bool IsDownloading() const override { return is_downloading_; }
     virtual bool IsPlaying() const override { return is_playing_; }
@@ -98,6 +100,11 @@ public:
     virtual int16_t* GetAudioData() override { return final_pcm_data_fft; }
     virtual int GetCurrentPositionSeconds() const override { return static_cast<int>(current_play_time_ms_ / 1000); }
     virtual int GetCurrentPositionMilliseconds() const override { return static_cast<int>(current_play_time_ms_); }
+
+    // 获取当前状态信息
+    size_t GetDownloadedBytes() const { return downloaded_bytes_.load(); }
+    int GetCurrentSampleRate() const { return mp3_frame_info_.samprate; }
+    int GetCurrentChannels() const { return mp3_frame_info_.nChans; }
 
     // 显示模式控制方法
     void SetDisplayMode(DisplayMode mode);

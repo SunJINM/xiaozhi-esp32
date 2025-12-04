@@ -23,6 +23,7 @@ public:
         // 默认实现：忽略位置参数，调用普通的StartStreaming
         return StartStreaming(music_url);
     }
+    virtual bool StartStreamingFromByteOffset(const std::string& music_url, size_t byte_offset) = 0;
     virtual size_t GetBufferSize() const = 0;
     virtual bool IsDownloading() const = 0;
     virtual bool IsPlaying() const = 0;
@@ -38,6 +39,10 @@ public:
     virtual bool PauseSong() = 0;
     virtual bool ResumeSong() = 0;
 
+    // 获取当前状态信息
+    virtual size_t GetDownloadedBytes() const = 0;
+    virtual int GetCurrentSampleRate() const = 0;
+    virtual int GetCurrentChannels() const = 0;
     // 回调设置方法(提供空实现,子类可选择性覆盖)
     virtual void SetSongFinishedCallback(std::function<void()> callback) {
         // 默认空实现

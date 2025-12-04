@@ -309,11 +309,31 @@ void MusicPlaylistManager::SaveCheckpoint(const std::string& url, int item_id, i
     checkpoint_.url = url;
     checkpoint_.item_id = item_id;
     checkpoint_.position_ms = position_ms;
+    checkpoint_.byte_offset = 0;  // 不使用字节偏移（方案A）
+    checkpoint_.sample_rate = 0;
+    checkpoint_.channels = 0;
     checkpoint_.timestamp_ms = esp_timer_get_time() / 1000;  // 当前时间(毫秒)
     checkpoint_.valid = true;
 
-    ESP_LOGI(TAG, "Checkpoint saved: item_id=%d, position=%lld ms",
+    ESP_LOGI(TAG, "Checkpoint saved (basic): item_id=%d, position=%lld ms",
              item_id, (long long)position_ms);
+}
+
+void MusicPlaylistManager::SaveCheckpointWithFrameInfo(const std::string& url, int item_id,
+                                                       int64_t position_ms, size_t byte_offset,
+                                                       int sample_rate, int channels) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    checkpoint_.url = url;
+    checkpoint_.item_id = item_id;
+    checkpoint_.position_ms = position_ms;
+    checkpoint_.byte_offset = byte_offset;
+    checkpoint_.sample_rate = sample_rate;
+    checkpoint_.channels = channels;
+    checkpoint_.timestamp_ms = esp_timer_get_time() / 1000;  // 当前时间(毫秒)
+    checkpoint_.valid = true;
+
+    ESP_LOGI(TAG, "Checkpoint saved (full): item_id=%d, position=%lld ms, byte_offset=%zu, rate=%d, ch=%d",
+             item_id, (long long)position_ms, byte_offset, sample_rate, channels);
 }
 
 void MusicPlaylistManager::ClearCheckpoint() {
@@ -322,6 +342,9 @@ void MusicPlaylistManager::ClearCheckpoint() {
     checkpoint_.url.clear();
     checkpoint_.item_id = 0;
     checkpoint_.position_ms = 0;
+    checkpoint_.byte_offset = 0;
+    checkpoint_.sample_rate = 0;
+    checkpoint_.channels = 0;
     checkpoint_.timestamp_ms = 0;
 
     ESP_LOGI(TAG, "Checkpoint cleared");

@@ -37,11 +37,15 @@ struct PlaybackCheckpoint {
     std::string url;           // 播放URL
     int item_id;               // 歌曲ID
     int64_t position_ms;       // 播放位置(毫秒)
+    size_t byte_offset;        // HTTP字节偏移量
+    int sample_rate;           // 采样率
+    int channels;              // 声道数
     int64_t timestamp_ms;      // 保存时间戳(毫秒)
     bool valid;                // 断点是否有效
 
     PlaybackCheckpoint()
-        : item_id(0), position_ms(0), timestamp_ms(0), valid(false) {}
+        : item_id(0), position_ms(0), byte_offset(0),
+          sample_rate(0), channels(0), timestamp_ms(0), valid(false) {}
 };
 
 class MusicPlaylistManager {
@@ -93,6 +97,9 @@ public:
 
     // 断点管理
     void SaveCheckpoint(const std::string& url, int item_id, int64_t position_ms);
+    void SaveCheckpointWithFrameInfo(const std::string& url, int item_id,
+                                     int64_t position_ms, size_t byte_offset,
+                                     int sample_rate, int channels);
     const PlaybackCheckpoint& GetCheckpoint() const { return checkpoint_; }
     bool HasCheckpoint() const { return checkpoint_.valid; }
     void ClearCheckpoint();

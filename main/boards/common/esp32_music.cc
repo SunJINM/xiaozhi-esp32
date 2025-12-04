@@ -129,9 +129,10 @@ static std::string url_encode(const std::string& str) {
 Esp32Music::Esp32Music() : last_downloaded_data_(), current_music_url_(), current_song_name_(),
                          song_name_displayed_(false),
                          display_mode_(DISPLAY_MODE_LYRICS), is_playing_(false), is_downloading_(false),
-                         is_paused_(false), play_thread_(), download_thread_(),
+                         is_paused_(false), is_waiting_(false), is_automated_(false),
+                         play_thread_(), download_thread_(),
                          current_play_time_ms_(0), last_frame_time_ms_(0), total_frames_decoded_(0),
-                         skip_to_position_ms_(0),
+                         skip_to_position_ms_(0), downloaded_bytes_(0),
                          audio_buffer_(), buffer_mutex_(),
                          buffer_cv_(), buffer_size_(0), mp3_decoder_(nullptr), mp3_frame_info_(),
                          mp3_decoder_initialized_(false), on_song_finished_(nullptr), on_error_(nullptr) {
@@ -279,17 +280,20 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
     
     // 清空缓冲区
     ClearAudioBuffer();
-    
+
+    // 重置已下载字节数
+    downloaded_bytes_ = 0;
+
     // 配置线程栈大小以避免栈溢出
     esp_pthread_cfg_t cfg = esp_pthread_get_default_config();
     cfg.stack_size = 8192;  // 8KB栈大小
     cfg.prio = 5;           // 中等优先级
     cfg.thread_name = "audio_stream";
     esp_pthread_set_cfg(&cfg);
-    
+
     // 开始下载线程
     is_downloading_ = true;
-    download_thread_ = std::thread(&Esp32Music::DownloadAudioStream, this, music_url);
+    download_thread_ = std::thread(&Esp32Music::DownloadAudioStream, this, music_url, 0);
     
     // 开始播放线程（会等待缓冲区有足够数据）
     is_playing_ = true;
@@ -380,15 +384,15 @@ bool Esp32Music::StopStreaming() {
     return true;
 }
 
-// 从指定位置开始流式播放
+// 从指定位置开始流式播放（方案A：解码丢弃法）
 bool Esp32Music::StartStreamingFromPosition(const std::string& music_url, int64_t position_ms) {
     if (music_url.empty()) {
         ESP_LOGE(TAG, "Music URL is empty");
         return false;
     }
 
-    // ESP_LOGI(TAG, "Starting streaming from position: %d ms, URL: %s",
-    //          (int64_t)position_ms, music_url.c_str());
+    ESP_LOGI(TAG, "Starting streaming from position: %lld ms (Method A: decode-skip)",
+             (long long)position_ms);
 
     // 设置跳转目标位置
     skip_to_position_ms_ = position_ms;
@@ -403,25 +407,96 @@ bool Esp32Music::StartStreamingFromPosition(const std::string& music_url, int64_
     return result;
 }
 
+// 从字节偏移开始流式播放（方案B：HTTP Range请求）
+bool Esp32Music::StartStreamingFromByteOffset(const std::string& music_url, size_t byte_offset) {
+    if (music_url.empty()) {
+        ESP_LOGE(TAG, "Music URL is empty");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Starting streaming from byte offset: %zu (Method B: HTTP Range)",
+             byte_offset);
+
+    // 确保MP3解码器已初始化
+    if (!mp3_decoder_initialized_) {
+        if (!InitializeMp3Decoder()) {
+            ESP_LOGE(TAG, "Failed to initialize MP3 decoder");
+            return false;
+        }
+    }
+
+    // 停止之前的播放和下载
+    is_downloading_ = false;
+    is_playing_ = false;
+
+    // 等待之前的线程完全结束
+    if (download_thread_.joinable()) {
+        {
+            std::lock_guard<std::mutex> lock(buffer_mutex_);
+            buffer_cv_.notify_all();
+        }
+        download_thread_.join();
+    }
+    if (play_thread_.joinable()) {
+        {
+            std::lock_guard<std::mutex> lock(buffer_mutex_);
+            buffer_cv_.notify_all();
+        }
+        play_thread_.join();
+    }
+
+    // 清空缓冲区
+    ClearAudioBuffer();
+
+    // 设置已下载字节数为起始偏移（用于继续累加）
+    downloaded_bytes_ = byte_offset;
+
+    // 配置线程栈大小
+    esp_pthread_cfg_t cfg = esp_pthread_get_default_config();
+    cfg.stack_size = 8192;
+    cfg.prio = 5;
+    cfg.thread_name = "audio_stream";
+    esp_pthread_set_cfg(&cfg);
+
+    // 开始下载线程（从指定字节偏移开始）
+    is_downloading_ = true;
+    download_thread_ = std::thread(&Esp32Music::DownloadAudioStream, this, music_url, byte_offset);
+
+    // 开始播放线程
+    is_playing_ = true;
+    is_paused_ = false;
+    play_thread_ = std::thread(&Esp32Music::PlayAudioStream, this);
+
+    ESP_LOGI(TAG, "Streaming threads started from byte offset %zu", byte_offset);
+
+    return true;
+}
+
 // 流式下载音频数据
-void Esp32Music::DownloadAudioStream(const std::string& music_url) {
-    ESP_LOGD(TAG, "Starting audio stream download from: %s", music_url.c_str());
-    
+void Esp32Music::DownloadAudioStream(const std::string& music_url, size_t start_byte) {
+    ESP_LOGD(TAG, "Starting audio stream download from: %s (start_byte=%zu)", music_url.c_str(), start_byte);
+
     // 验证URL有效性
     if (music_url.empty() || music_url.find("http") != 0) {
         ESP_LOGE(TAG, "Invalid URL format: %s", music_url.c_str());
         is_downloading_ = false;
         return;
     }
-    
+
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(0);
-    
+
     // 设置基本请求头
     http->SetHeader("User-Agent", "ESP32-Music-Player/1.0");
     http->SetHeader("Accept", "*/*");
-    http->SetHeader("Range", "bytes=0-");  // 支持断点续传
-    
+
+    // 如果需要从指定字节开始下载，添加 Range 请求头
+    if (start_byte > 0) {
+        std::string range_header = "bytes=" + std::to_string(start_byte) + "-";
+        http->SetHeader("Range", range_header);
+        ESP_LOGI(TAG, "HTTP Range request: %s", range_header.c_str());
+    }
+
     // 添加ESP32认证头
     add_auth_headers(http.get());
     
@@ -456,6 +531,9 @@ void Esp32Music::DownloadAudioStream(const std::string& music_url) {
             ESP_LOGI(TAG, "Audio stream download completed, total: %d bytes", total_downloaded);
             break;
         }
+
+        // 累加已下载字节数（用于断点续传）
+        downloaded_bytes_ += bytes_read;
         
         // 打印数据块信息
         // ESP_LOGI(TAG, "Downloaded chunk: %d bytes at offset %d", bytes_read, total_downloaded);
@@ -1040,10 +1118,10 @@ bool Esp32Music::ResumeSong() {
     ESP_LOGI(TAG, "ResumeSong called");
     
     // 检查是否正在播放
-    if (!is_playing_) {
-        ESP_LOGW(TAG, "No music is currently playing");
-        return false;
-    }
+    // if (!is_playing_) {
+    //     ESP_LOGW(TAG, "No music is currently playing");
+    //     return false;
+    // }
     
     // 检查是否已经恢复
     if (!is_paused_) {

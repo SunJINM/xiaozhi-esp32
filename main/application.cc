@@ -259,6 +259,7 @@ void Application::ToggleChatState() {
                 if (!protocol_->OpenAudioChannel()) {
                     return;
                 }
+                SendDeviceStatus();
             }
 
             SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
@@ -860,7 +861,6 @@ void Application::PlaySound(const std::string_view& sound) {
 // 新增：接收外部音频数据（如音乐播放）
 void Application::AddAudioData(AudioStreamPacket&& packet) {
     auto codec = Board::GetInstance().GetAudioCodec();
-    ESP_LOGI(TAG, "AddAudioData: device_state=%d, output_enabled=%d", device_state_, codec->output_enabled());
     if (device_state_ == kDeviceStateSpeaking && codec->output_enabled()) {
         // packet.payload包含的是原始PCM数据（int16_t）
         if (packet.payload.size() >= 2) {
@@ -1049,17 +1049,24 @@ void Application::HandleMusicControl(const std::string& action) {
         music->PlaySong();
         SendMusicStatus(true);
     } else if (action == "pause") {
-        // 保存断点信息
+        // 保存断点信息（方案B：包含字节偏移和帧信息）
         const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
         if (current_item != nullptr) {
             int64_t position_ms = static_cast<int64_t>(music->GetCurrentPositionMilliseconds());
-            music_playlist_manager_->SaveCheckpoint(
+            size_t byte_offset = music->GetDownloadedBytes();
+            int sample_rate = music->GetCurrentSampleRate();
+            int channels = music->GetCurrentChannels();
+
+            music_playlist_manager_->SaveCheckpointWithFrameInfo(
                 current_item->url,
                 current_item->item_id,
-                position_ms
+                position_ms,
+                byte_offset,
+                sample_rate,
+                channels
             );
-            ESP_LOGI(TAG, "Checkpoint saved: item_id=%d, position=%lld ms",
-                     current_item->item_id, (long long)position_ms);
+            ESP_LOGI(TAG, "Checkpoint saved: item_id=%d, position=%lld ms, byte_offset=%zu, rate=%d, ch=%d",
+                     current_item->item_id, (long long)position_ms, byte_offset, sample_rate, channels);
         }
 
         // 停止播放（完全停止，线程退出）
@@ -1076,15 +1083,30 @@ void Application::HandleMusicControl(const std::string& action) {
     } else if (action == "resume") {
         // 从断点恢复播放
         if (music_playlist_manager_->HasCheckpoint()) {
+            music_is_stopped_ = false;
+            StartMusicStatusTimer();
+            SendMusicStatus(true);
             const auto& checkpoint = music_playlist_manager_->GetCheckpoint();
-            ESP_LOGI(TAG, "Resuming from checkpoint: item_id=%d, position=%d ms",
-                     checkpoint.item_id, (int64_t)checkpoint.position_ms);
+            ESP_LOGI(TAG, "Resuming from checkpoint: item_id=%d, position=%lld ms, byte_offset=%zu",
+                     checkpoint.item_id, (long long)checkpoint.position_ms, checkpoint.byte_offset);
 
-            // 重新启动流式播放，从断点位置开始
-            if (music->StartStreamingFromPosition(checkpoint.url, checkpoint.position_ms)) {
-                music_is_stopped_ = false;
-                StartMusicStatusTimer();
-                SendMusicStatus(true);
+            bool resume_success = false;
+            music->ResumeSong();
+
+            // 方案B：如果有字节偏移信息，使用 HTTP Range 请求（快速恢复）
+            if (checkpoint.byte_offset > 0 && checkpoint.sample_rate > 0 && checkpoint.channels > 0) {
+                ESP_LOGI(TAG, "Using Method B: HTTP Range from byte %zu (rate=%d, ch=%d)",
+                         checkpoint.byte_offset, checkpoint.sample_rate, checkpoint.channels);
+                resume_success = music->StartStreamingFromByteOffset(checkpoint.url, checkpoint.byte_offset);
+            }
+
+            // 方案A：降级策略，如果方案B失败或没有字节偏移信息，使用解码丢弃法
+            if (!resume_success) {
+                ESP_LOGW(TAG, "Method B failed or unavailable, fallback to Method A: decode-skip");
+                resume_success = music->StartStreamingFromPosition(checkpoint.url, checkpoint.position_ms);
+            }
+
+            if (resume_success) {
 
                 // 清除断点
                 music_playlist_manager_->ClearCheckpoint();
@@ -1266,7 +1288,7 @@ void Application::StartMusicStatusTimer() {
 
     esp_err_t err = esp_timer_create(&timer_args, &music_status_timer_);
     if (err == ESP_OK) {
-        esp_timer_start_periodic(music_status_timer_, 3000000);  // 3秒
+        esp_timer_start_periodic(music_status_timer_, 30000000);  // 3秒
         ESP_LOGI(TAG, "Music status timer started");
     } else {
         ESP_LOGE(TAG, "Failed to create music status timer: %d", err);
