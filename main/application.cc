@@ -537,6 +537,7 @@ void Application::Start() {
             }
 #endif
         } else if (strcmp(type->valuestring, "music") == 0) {
+            ESP_LOGI(TAG, "Received music control");
             auto data = cJSON_GetObjectItem(root, "data");
             if (cJSON_IsObject(data)) {
                 Schedule([this, data_str = std::string(cJSON_PrintUnformatted(data))]() {
@@ -976,8 +977,52 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
         return;
     }
 
+    int new_playlist_id = playlist_id->valueint;
+    int new_start_item_id = start_item_id->valueint;
+    bool is_same_playlist = (music_playlist_manager_->GetPlaylistId() == new_playlist_id);
+
+    // 如果是同一个播放列表，仅切换歌曲
+    if (is_same_playlist) {
+        ESP_LOGI(TAG, "Same playlist_id=%d, switching to item_id=%d",
+                 new_playlist_id, new_start_item_id);
+
+        // 更新播放模式和类型（可能变化）
+        music_playlist_manager_->SetPlayMode(static_cast<PlayMode>(play_mode->valueint));
+        music_playlist_manager_->SetPlayType(static_cast<PlayType>(play_type->valueint));
+
+        // 切换到指定歌曲
+        if (music_playlist_manager_->SetCurrentByItemId(new_start_item_id)) {
+            auto& board = Board::GetInstance();
+            auto music = board.GetMusic();
+            if (music != nullptr) {
+                AbortSpeaking(kAbortReasonNone);
+                const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
+                if (current_item != nullptr) {
+                    ESP_LOGI(TAG, "Switching to: %s", current_item->resource_name.c_str());
+
+                    // 平滑切换：停止当前播放，开始新歌曲
+                    music->StopStreaming();
+                    if (music->StartStreaming(current_item->url)) {
+                        music_is_stopped_ = false;
+                        music->SetAutomated(false);
+                        StartMusicStatusTimer();
+                        SendMusicStatus(true);
+                    } else {
+                        ESP_LOGE(TAG, "Failed to start streaming");
+                    }
+                }
+            }
+        } else {
+            ESP_LOGW(TAG, "Failed to switch to item_id=%d", new_start_item_id);
+        }
+        return;
+    }
+
+    // 不同播放列表，完整设置流程
+    ESP_LOGI(TAG, "New playlist_id=%d, loading full playlist", new_playlist_id);
+
     // 设置播放列表信息
-    music_playlist_manager_->SetPlaylistId(playlist_id->valueint);
+    music_playlist_manager_->SetPlaylistId(new_playlist_id);
     music_playlist_manager_->SetResourceType(resource_type->valueint);
     music_playlist_manager_->SetPlayMode(static_cast<PlayMode>(play_mode->valueint));
     music_playlist_manager_->SetPlayType(static_cast<PlayType>(play_type->valueint));
@@ -1007,12 +1052,12 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
     }
 
     music_playlist_manager_->SetPlaylist(playlist);
-    music_playlist_manager_->SetCurrentByItemId(start_item_id->valueint);
+    music_playlist_manager_->SetCurrentByItemId(new_start_item_id);
 
     ESP_LOGI(TAG, "Playlist set: id=%d, type=%d, mode=%d, play_type=%d, items=%d, start=%d",
-             playlist_id->valueint, resource_type->valueint,
+             new_playlist_id, resource_type->valueint,
              play_mode->valueint, play_type->valueint,
-             playlist.size(), start_item_id->valueint);
+             playlist.size(), new_start_item_id);
 
     // 自动开始播放第一首
     auto& board = Board::GetInstance();
@@ -1083,6 +1128,7 @@ void Application::HandleMusicControl(const std::string& action) {
     } else if (action == "resume") {
         // 从断点恢复播放
         if (music_playlist_manager_->HasCheckpoint()) {
+            AbortSpeaking(kAbortReasonNone);
             music_is_stopped_ = false;
             StartMusicStatusTimer();
             SendMusicStatus(true);

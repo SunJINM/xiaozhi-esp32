@@ -287,7 +287,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
     // 配置线程栈大小以避免栈溢出
     esp_pthread_cfg_t cfg = esp_pthread_get_default_config();
     cfg.stack_size = 8192;  // 8KB栈大小
-    cfg.prio = 5;           // 中等优先级
+    cfg.prio = 2;           // 中等优先级
     cfg.thread_name = "audio_stream";
     esp_pthread_set_cfg(&cfg);
 
@@ -454,7 +454,7 @@ bool Esp32Music::StartStreamingFromByteOffset(const std::string& music_url, size
     // 配置线程栈大小
     esp_pthread_cfg_t cfg = esp_pthread_get_default_config();
     cfg.stack_size = 8192;
-    cfg.prio = 5;
+    cfg.prio = 2;
     cfg.thread_name = "audio_stream";
     esp_pthread_set_cfg(&cfg);
 
@@ -664,6 +664,7 @@ void Esp32Music::PlayAudioStream() {
     auto& app = Application::GetInstance();
     
     while (is_playing_) {
+        vTaskDelay(1);
         // 检查是否被暂停
         if (is_paused_) {
             ESP_LOGD(TAG, "Music playback paused, waiting...");
