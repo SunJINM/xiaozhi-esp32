@@ -962,6 +962,19 @@ void Application::HandleMusicCommand(const cJSON* data) {
 }
 
 void Application::HandleMusicSetPlaylist(const cJSON* data) {
+    // 防抖逻辑：检查是否在短时间内重复调用
+    int64_t current_time = esp_timer_get_time();  // 获取当前时间（微秒）
+    int64_t time_diff_ms = (current_time - last_set_playlist_time_) / 1000;  // 转换为毫秒
+
+    if (last_set_playlist_time_ > 0 && time_diff_ms < kSetPlaylistDebounceMs) {
+        ESP_LOGW(TAG, "HandleMusicSetPlaylist called too frequently (%.0f ms), ignoring to prevent device crash",
+                 (double)time_diff_ms);
+        return;
+    }
+
+    // 更新最后调用时间
+    last_set_playlist_time_ = current_time;
+
     // 解析播放列表
     auto playlist_id = cJSON_GetObjectItem(data, "playlist_id");
     auto resource_type = cJSON_GetObjectItem(data, "resource_type");
@@ -995,7 +1008,9 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
             auto& board = Board::GetInstance();
             auto music = board.GetMusic();
             if (music != nullptr) {
-                AbortSpeaking(kAbortReasonNone);
+                if (!music->IsPlaying()) {
+                    AbortSpeaking(kAbortReasonNone);        
+                }
                 const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
                 if (current_item != nullptr) {
                     ESP_LOGI(TAG, "Switching to: %s", current_item->resource_name.c_str());

@@ -92,6 +92,10 @@ private:
     esp_timer_handle_t music_status_timer_ = nullptr;
     bool music_is_stopped_ = true;  // 音乐停止状态标记
 
+    // 防抖相关：防止短时间内重复下发 set_playlist 指令
+    int64_t last_set_playlist_time_ = 0;  // 上次执行 set_playlist 的时间戳（微秒）
+    static constexpr int64_t kSetPlaylistDebounceMs = 500;  // 防抖时间间隔（毫秒）
+
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);
     void ShowActivationCode(const std::string& code, const std::string& message);
