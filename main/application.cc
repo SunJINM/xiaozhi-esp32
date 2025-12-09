@@ -1008,7 +1008,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
             auto& board = Board::GetInstance();
             auto music = board.GetMusic();
             if (music != nullptr) {
-                if (!music->IsPlaying()) {
+                if (!music->IsPlaying() && !is_switching_song_) {
                     AbortSpeaking(kAbortReasonNone);        
                 }
                 const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
@@ -1019,11 +1019,14 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
                     music->StopStreaming();
                     if (music->StartStreaming(current_item->url)) {
                         music_is_stopped_ = false;
+                        is_switching_song_ = false;  // 清除切歌标志
                         music->SetAutomated(false);
                         StartMusicStatusTimer();
                         SendMusicStatus(true);
+                        ESP_LOGI(TAG, "Song switched, is_switching_song cleared");
                     } else {
                         ESP_LOGE(TAG, "Failed to start streaming");
+                        is_switching_song_ = false;  // 即使失败也要清除标志
                     }
                 }
             }
@@ -1084,11 +1087,14 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
             ESP_LOGI(TAG, "Starting playback: %s", current_item->resource_name.c_str());
             if (music->StartStreaming(current_item->url)) {
                 music_is_stopped_ = false;  // 新播放列表开始播放，清除停止标记
+                is_switching_song_ = false;  // 清除切歌标志
                 music->SetAutomated(false);
                 StartMusicStatusTimer();
                 SendMusicStatus(true);  // 立即发送开始播放状态
+                ESP_LOGI(TAG, "New playlist started, is_switching_song cleared");
             } else {
                 ESP_LOGE(TAG, "Failed to start streaming");
+                is_switching_song_ = false;  // 即使失败也要清除标志
             }
         }
     }
@@ -1182,10 +1188,12 @@ void Application::HandleMusicControl(const std::string& action) {
             SendMusicStatus(true);
         }
     } else if (action == "stop") {
+        is_switching_song_ = true;  // 设置切歌标志，防止状态切换到聆听
         music->StopSong();
         music_is_stopped_ = true;  // 设置停止标记
         StopMusicStatusTimer();
         SendMusicStatus(true);  // 发送一次停止状态后，后续不再发送
+        ESP_LOGI(TAG, "Music stopped, is_switching_song set to true");
     } else if (action == "next") {
         // 手动切换下一曲 - 不受播放模式限制
         const MusicItem* next_item = music_playlist_manager_->ManualNext();

@@ -49,6 +49,7 @@ public:
     void MainEventLoop();
     DeviceState GetDeviceState() const { return device_state_; }
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
+    bool IsSwitchingSong() const { return is_switching_song_; }  // 检查是否正在切歌
     void Schedule(std::function<void()> callback);
     void SetDeviceState(DeviceState state);
     void Alert(const char* status, const char* message, const char* emotion = "", const std::string_view& sound = "");
@@ -95,6 +96,9 @@ private:
     // 防抖相关：防止短时间内重复下发 set_playlist 指令
     int64_t last_set_playlist_time_ = 0;  // 上次执行 set_playlist 的时间戳（微秒）
     static constexpr int64_t kSetPlaylistDebounceMs = 500;  // 防抖时间间隔（毫秒）
+
+    // 切歌状态管理：防止切歌时设备状态切换到聆听状态
+    bool is_switching_song_ = false;  // 正在切歌标志
 
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);

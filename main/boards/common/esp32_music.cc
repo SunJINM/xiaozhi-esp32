@@ -683,9 +683,6 @@ void Esp32Music::PlayAudioStream() {
             vTaskDelay(pdMS_TO_TICKS(300));
             is_waiting_ = false;
             continue;
-        } else if (is_waiting_ && !is_automated_) {
-            vTaskDelay(pdMS_TO_TICKS(50));
-            continue;
         }
 
 
@@ -944,7 +941,7 @@ void Esp32Music::PlayAudioStream() {
         ESP_LOGI(TAG, "Song finished normally, calling callback");
         on_song_finished_();  // 调用播放完成回调,触发下一曲
         // 注意: 不要在这里切换设备状态,新歌曲的播放线程会自动处理
-    } else {
+    } else if (!app.IsSwitchingSong()){
         // 用户手动停止,切换到listening状态
         ESP_LOGI(TAG, "Playback stopped by user, switching to listening state");
         app.Schedule([this, &app]() {
