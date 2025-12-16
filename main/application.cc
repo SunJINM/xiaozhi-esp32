@@ -1150,14 +1150,14 @@ void Application::HandleMusicControl(const std::string& action) {
         if (music_playlist_manager_->HasCheckpoint()) {
             AbortSpeaking(kAbortReasonNone);
             music_is_stopped_ = false;
-            SendMusicStatus(true);
-            StartMusicStatusTimer();
             const auto& checkpoint = music_playlist_manager_->GetCheckpoint();
             ESP_LOGI(TAG, "Resuming from checkpoint: item_id=%d, position=%lld ms, byte_offset=%zu",
                      checkpoint.item_id, (long long)checkpoint.position_ms, checkpoint.byte_offset);
 
             bool resume_success = false;
             music->ResumeSong();
+            SendMusicStatus(true);
+            StartMusicStatusTimer();
 
             // 方案B：如果有字节偏移信息，使用 HTTP Range 请求（快速恢复）
             if (checkpoint.byte_offset > 0 && checkpoint.sample_rate > 0 && checkpoint.channels > 0) {
