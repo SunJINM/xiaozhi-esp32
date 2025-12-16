@@ -8,6 +8,7 @@
 #include "assets/lang_config.h"
 #include "mcp_server.h"
 #include "boards/common/music_playlist_manager.h"
+#include "settings.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -550,17 +551,15 @@ void Application::Start() {
             } else {
                 ESP_LOGW(TAG, "Invalid music message format: missing data");
             }
-        } else if (strcmp(type->valuestring, "ping") == 0) {
+        } else if (strcmp(type->valuestring, "bind") == 0) {
             // 响应ping消息，返回pong
-            ESP_LOGI(TAG, "Received ping, sending pong");
-            cJSON* pong_message = cJSON_CreateObject();
-            cJSON_AddStringToObject(pong_message, "type", "pong");
-            char* pong_str = cJSON_PrintUnformatted(pong_message);
-            if (pong_str != nullptr) {
-                protocol_->SendJson(pong_str);
-                free(pong_str);
+            ESP_LOGI(TAG, "Received bind");
+            {
+                Settings settings("wifi", true);
+                settings.SetInt("force_ap", 1);
+                settings.SetInt("bind", 1);
             }
-            cJSON_Delete(pong_message);
+            Reboot();
         } else if (strcmp(type->valuestring, "device_status") == 0) {
             // 返回设备状态信息（电量、音量、网络）
             ESP_LOGI(TAG, "Received device_status request");
@@ -588,6 +587,7 @@ void Application::Start() {
 
         // vTaskDelay(pdMS_TO_TICKS(500));
         // audio_service_.PlaySound(Lang::Sounds::OGG_BIRTHDAY);
+        ToggleChatState();
     }
 }
 
@@ -1115,6 +1115,16 @@ void Application::HandleMusicControl(const std::string& action) {
         music->PlaySong();
         SendMusicStatus(true);
     } else if (action == "pause") {
+        // 停止播放（完全停止，线程退出）
+        music->StopSong();
+        music->PauseSong();
+        music_is_stopped_ = true;
+        SendMusicStatus(true);
+        StopMusicStatusTimer();
+        // 切换到 listening 状态，等待用户输入
+        Schedule([this]() {
+            SetDeviceState(kDeviceStateListening);
+        });
         // 保存断点信息（方案B：包含字节偏移和帧信息）
         const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
         if (current_item != nullptr) {
@@ -1134,25 +1144,13 @@ void Application::HandleMusicControl(const std::string& action) {
             ESP_LOGI(TAG, "Checkpoint saved: item_id=%d, position=%lld ms, byte_offset=%zu, rate=%d, ch=%d",
                      current_item->item_id, (long long)position_ms, byte_offset, sample_rate, channels);
         }
-
-        // 停止播放（完全停止，线程退出）
-        music->StopSong();
-        music->PauseSong();
-        music_is_stopped_ = true;
-        StopMusicStatusTimer();
-        SendMusicStatus(true);
-
-        // 切换到 listening 状态，等待用户输入
-        Schedule([this]() {
-            SetDeviceState(kDeviceStateListening);
-        });
     } else if (action == "resume") {
         // 从断点恢复播放
         if (music_playlist_manager_->HasCheckpoint()) {
             AbortSpeaking(kAbortReasonNone);
             music_is_stopped_ = false;
-            StartMusicStatusTimer();
             SendMusicStatus(true);
+            StartMusicStatusTimer();
             const auto& checkpoint = music_playlist_manager_->GetCheckpoint();
             ESP_LOGI(TAG, "Resuming from checkpoint: item_id=%d, position=%lld ms, byte_offset=%zu",
                      checkpoint.item_id, (long long)checkpoint.position_ms, checkpoint.byte_offset);

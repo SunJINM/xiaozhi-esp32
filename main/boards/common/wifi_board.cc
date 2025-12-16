@@ -340,8 +340,15 @@ void WifiBoard::EnterWifiConfigMode() {
 
     ESP_LOGI(TAG, "BLUFI VERSION %04x", esp_blufi_get_version());
 
-    // std::string hint = Lang::Strings::CONNECT_VIA_BLUETOOTH; // Add a new string for Bluetooth
-    // application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG); // Temporarily commented out voice prompt
+    Settings settings("wifi", true);
+    if (settings.GetInt("bind", 1) == 1) {
+        std::string hint = Lang::Strings::BIND_USER;
+        application.Alert(Lang::Strings::BIND_USER, hint.c_str(), "", Lang::Sounds::OGG_USER_BIND);
+        settings.SetInt("bind", 0);
+    } else {
+        std::string hint = Lang::Strings::ENTERING_WIFI_CONFIG_MODE;
+        application.Alert(Lang::Strings::ENTERING_WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::OGG_WIFI_CONFIG);
+    }
     
     // Wait forever until reset after configuration
     while(true) {
