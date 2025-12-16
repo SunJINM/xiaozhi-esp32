@@ -971,6 +971,11 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
                  (double)time_diff_ms);
         return;
     }
+    auto& board = Board::GetInstance();
+    auto music = board.GetMusic();
+    is_switching_song_ = true;  // 设置切歌标志，防止状态切换到聆听
+    music->StopSong();
+    music_is_stopped_ = true;
 
     // 更新最后调用时间
     last_set_playlist_time_ = current_time;
@@ -1005,8 +1010,6 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
 
         // 切换到指定歌曲
         if (music_playlist_manager_->SetCurrentByItemId(new_start_item_id)) {
-            auto& board = Board::GetInstance();
-            auto music = board.GetMusic();
             if (music != nullptr) {
                 if (!music->IsPlaying() && !is_switching_song_) {
                     AbortSpeaking(kAbortReasonNone);        
@@ -1016,7 +1019,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
                     ESP_LOGI(TAG, "Switching to: %s", current_item->resource_name.c_str());
 
                     // 平滑切换：停止当前播放，开始新歌曲
-                    music->StopStreaming();
+                    // music->StopStreaming();
                     if (music->StartStreaming(current_item->url)) {
                         music_is_stopped_ = false;
                         is_switching_song_ = false;  // 清除切歌标志
@@ -1078,8 +1081,6 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
              playlist.size(), new_start_item_id);
 
     // 自动开始播放第一首
-    auto& board = Board::GetInstance();
-    auto music = board.GetMusic();
     if (music != nullptr) {
         AbortSpeaking(kAbortReasonNone);
         const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
