@@ -270,7 +270,8 @@ void Application::ToggleChatState() {
             AbortSpeaking(kAbortReasonNone);
             auto music = Board::GetInstance().GetMusic();
             if (music->IsPlaying()) {
-                music->StopSong();
+                HandleMusicControl("pause");
+                is_music_playing_ = false;
                 music_is_stopped_ = true;
                 StopMusicStatusTimer();
                 SendMusicStatus(true);
@@ -427,7 +428,8 @@ void Application::Start() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (device_state_ == kDeviceStateSpeaking) {
+        ESP_LOGI(TAG, "receive audio, is_music_playing is %d", (int)is_music_playing_);
+        if (device_state_ == kDeviceStateSpeaking && !is_music_playing_) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
@@ -976,6 +978,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
     is_switching_song_ = true;  // 设置切歌标志，防止状态切换到聆听
     music->StopSong();
     music_is_stopped_ = true;
+    is_music_playing_ = false;
 
     // 更新最后调用时间
     last_set_playlist_time_ = current_time;
@@ -1022,6 +1025,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
                     // music->StopStreaming();
                     if (music->StartStreaming(current_item->url)) {
                         music_is_stopped_ = false;
+                        is_music_playing_ = true;
                         is_switching_song_ = false;  // 清除切歌标志
                         music->SetAutomated(false);
                         StartMusicStatusTimer();
@@ -1087,6 +1091,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
         if (current_item != nullptr) {
             ESP_LOGI(TAG, "Starting playback: %s", current_item->resource_name.c_str());
             if (music->StartStreaming(current_item->url)) {
+                is_music_playing_ = true;
                 music_is_stopped_ = false;  // 新播放列表开始播放，清除停止标记
                 is_switching_song_ = false;  // 清除切歌标志
                 music->SetAutomated(false);
@@ -1112,10 +1117,13 @@ void Application::HandleMusicControl(const std::string& action) {
     ESP_LOGI(TAG, "Music control: %s", action.c_str());
 
     if (action == "play") {
+        is_music_playing_ = true;
         music_is_stopped_ = false;  // 开始播放，清除停止标记
         music->PlaySong();
         SendMusicStatus(true);
     } else if (action == "pause") {
+        AbortSpeaking(kAbortReasonNone);
+        is_music_playing_ = false;
         // 停止播放（完全停止，线程退出）
         music->StopSong();
         music->PauseSong();
@@ -1146,6 +1154,7 @@ void Application::HandleMusicControl(const std::string& action) {
                      current_item->item_id, (long long)position_ms, byte_offset, sample_rate, channels);
         }
     } else if (action == "resume") {
+        is_music_playing_ = true;
         // 从断点恢复播放
         if (music_playlist_manager_->HasCheckpoint()) {
             AbortSpeaking(kAbortReasonNone);
@@ -1187,6 +1196,7 @@ void Application::HandleMusicControl(const std::string& action) {
             SendMusicStatus(true);
         }
     } else if (action == "stop") {
+        is_music_playing_ = false;
         is_switching_song_ = true;  // 设置切歌标志，防止状态切换到聆听
         music->StopSong();
         music_is_stopped_ = true;  // 设置停止标记
@@ -1194,6 +1204,7 @@ void Application::HandleMusicControl(const std::string& action) {
         SendMusicStatus(true);  // 发送一次停止状态后，后续不再发送
         ESP_LOGI(TAG, "Music stopped, is_switching_song set to true");
     } else if (action == "next") {
+        is_music_playing_ = true;
         // 手动切换下一曲 - 不受播放模式限制
         const MusicItem* next_item = music_playlist_manager_->ManualNext();
         if (next_item != nullptr) {
@@ -1208,6 +1219,7 @@ void Application::HandleMusicControl(const std::string& action) {
             ESP_LOGW(TAG, "Manual next failed: playlist empty");
         }
     } else if (action == "prev") {
+        is_music_playing_ = true;
         // 手动切换上一曲 - 不受播放模式限制
         const MusicItem* prev_item = music_playlist_manager_->ManualPrevious();
         if (prev_item != nullptr) {

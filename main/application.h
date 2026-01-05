@@ -92,6 +92,7 @@ private:
     std::unique_ptr<MusicPlaylistManager> music_playlist_manager_;
     esp_timer_handle_t music_status_timer_ = nullptr;
     bool music_is_stopped_ = true;  // 音乐停止状态标记
+    bool is_music_playing_ = false;
 
     // 防抖相关：防止短时间内重复下发 set_playlist 指令
     int64_t last_set_playlist_time_ = 0;  // 上次执行 set_playlist 的时间戳（微秒）
