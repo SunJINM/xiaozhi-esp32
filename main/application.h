@@ -91,15 +91,13 @@ private:
     // 音乐播放管理
     std::unique_ptr<MusicPlaylistManager> music_playlist_manager_;
     esp_timer_handle_t music_status_timer_ = nullptr;
-    bool music_is_stopped_ = true;  // 音乐停止状态标记
+    bool music_is_stopped_ = true;
     bool is_music_playing_ = false;
+    bool is_switching_song_ = false;
 
-    // 防抖相关：防止短时间内重复下发 set_playlist 指令
-    int64_t last_set_playlist_time_ = 0;  // 上次执行 set_playlist 的时间戳（微秒）
-    static constexpr int64_t kSetPlaylistDebounceMs = 500;  // 防抖时间间隔（毫秒）
-
-    // 切歌状态管理：防止切歌时设备状态切换到聆听状态
-    bool is_switching_song_ = false;  // 正在切歌标志
+    // HTTPS异步拉取歌单
+    TaskHandle_t playlist_fetch_task_ = nullptr;
+    int current_playlist_id_ = -1;
 
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);
@@ -116,6 +114,15 @@ private:
     void StartMusicStatusTimer();
     void StopMusicStatusTimer();
     static void MusicStatusTimerCallback(void* arg);
+
+    // HTTPS歌单拉取
+    struct FetchParams {
+        Application* app;
+        std::string url;
+        int playlist_id;
+    };
+    void FetchPlaylistAsync(const std::string& url, int playlist_id);
+    static void PlaylistFetchTask(void* arg);
 
     // 设备状态相关
     void SendDeviceStatus();

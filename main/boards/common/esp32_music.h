@@ -59,8 +59,11 @@ private:
     std::mutex buffer_mutex_;
     std::condition_variable buffer_cv_;
     size_t buffer_size_;
-    static constexpr size_t MAX_BUFFER_SIZE = 256 * 1024;  // 256KB缓冲区（降低以减少brownout风险）
-    static constexpr size_t MIN_BUFFER_SIZE = 32 * 1024;   // 32KB最小播放缓冲（降低以减少brownout风险）
+    static constexpr size_t MAX_BUFFER_SIZE = 256 * 1024;     // 256KB最大缓冲区
+    static constexpr size_t INITIAL_BUFFER_SIZE = 8 * 1024;   // 8KB初始快速启动缓冲
+    static constexpr size_t STABLE_BUFFER_SIZE = 32 * 1024;   // 32KB稳定播放缓冲
+    static constexpr size_t MIN_BUFFER_SIZE = 32 * 1024;      // 32KB最小播放缓冲(兼容性保留)
+    std::atomic<bool> is_initial_buffering_;                   // 是否处于初始缓冲阶段
     
     // MP3解码器相关
     HMP3Decoder mp3_decoder_;

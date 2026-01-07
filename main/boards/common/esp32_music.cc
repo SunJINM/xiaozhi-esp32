@@ -134,7 +134,8 @@ Esp32Music::Esp32Music() : last_downloaded_data_(), current_music_url_(), curren
                          current_play_time_ms_(0), last_frame_time_ms_(0), total_frames_decoded_(0),
                          skip_to_position_ms_(0), downloaded_bytes_(0),
                          audio_buffer_(), buffer_mutex_(),
-                         buffer_cv_(), buffer_size_(0), mp3_decoder_(nullptr), mp3_frame_info_(),
+                         buffer_cv_(), buffer_size_(0), is_initial_buffering_(false),
+                         mp3_decoder_(nullptr), mp3_frame_info_(),
                          mp3_decoder_initialized_(false), on_song_finished_(nullptr), on_error_(nullptr) {
     ESP_LOGI(TAG, "Music player initialized with default spectrum display mode");
     // 延迟MP3解码器初始化，避免在构造函数中初始化导致的问题
@@ -307,23 +308,32 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
 
 // 停止流式播放
 bool Esp32Music::StopStreaming() {
-    ESP_LOGI(TAG, "Stopping music streaming - current state: downloading=%d, playing=%d", 
+    ESP_LOGI(TAG, "Stopping music streaming - current state: downloading=%d, playing=%d",
             is_downloading_.load(), is_playing_.load());
 
-    
+
     // 检查是否有流式播放正在进行
     if (!is_playing_ && !is_downloading_) {
         ESP_LOGW(TAG, "No streaming in progress");
         return true;
     }
-    
+
+    // 软件静音保护: 停止前先将音量降为0,避免爆音
+    auto& board = Board::GetInstance();
+    auto codec = board.GetAudioCodec();
+    int original_volume = codec->output_volume();
+    if (original_volume > 0) {
+        ESP_LOGI(TAG, "Muting audio (volume: %d -> 0) to prevent pop noise", original_volume);
+        codec->SetOutputVolume(0);
+        vTaskDelay(pdMS_TO_TICKS(50));  // 等待静音生效
+    }
+
     // 停止下载和播放标志
     is_downloading_ = false;
     is_playing_ = false;
     is_paused_ = false;  // 重置暂停状态
-    
+
     // 清空歌名显示
-    auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
     if (display) {
         display->SetMusicInfo("");  // 清空歌名显示
@@ -379,8 +389,14 @@ bool Esp32Music::StopStreaming() {
             }
         }
     }
-    
-    ESP_LOGI(TAG, "Music streaming stop signal sent");
+
+    // 恢复原始音量(为下次播放准备)
+    if (original_volume > 0) {
+        codec->SetOutputVolume(original_volume);
+        ESP_LOGI(TAG, "Restored audio volume to %d", original_volume);
+    }
+
+    ESP_LOGI(TAG, "Music streaming stopped successfully");
     return true;
 }
 
@@ -634,17 +650,20 @@ void Esp32Music::PlayAudioStream() {
         is_playing_ = false;
         return;
     }
-    
-    
-    // 等待缓冲区有足够数据开始播放
+
+
+    // 渐进式缓冲策略: 初始阶段使用小缓冲快速启动
+    is_initial_buffering_ = true;
+
+    // 等待初始缓冲(快速启动)
     {
         std::unique_lock<std::mutex> lock(buffer_mutex_);
-        buffer_cv_.wait(lock, [this] { 
-            return buffer_size_ >= MIN_BUFFER_SIZE || (!is_downloading_ && !audio_buffer_.empty()); 
+        buffer_cv_.wait(lock, [this] {
+            return buffer_size_ >= INITIAL_BUFFER_SIZE || (!is_downloading_ && !audio_buffer_.empty());
         });
     }
 
-    ESP_LOGI(TAG, "Starting playback with buffer size: %d", buffer_size_);
+    ESP_LOGI(TAG, "Starting playback with initial buffer: %d bytes (fast start mode)", buffer_size_);
     
     size_t total_played = 0;
     uint8_t* mp3_input_buffer = nullptr;
@@ -692,7 +711,7 @@ void Esp32Music::PlayAudioStream() {
             app.Schedule([this, &app]() {
                 app.SetDeviceState(kDeviceStateSpeaking);
             });
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(20));  // 优化: 50ms → 20ms 减少状态切换延迟
             continue;
         }
         
@@ -719,10 +738,16 @@ void Esp32Music::PlayAudioStream() {
             }
         }
         
+        // 渐进式缓冲: 播放64KB后切换到稳定模式
+        if (is_initial_buffering_ && total_played > 64 * 1024) {
+            is_initial_buffering_ = false;
+            ESP_LOGI(TAG, "Switched to stable buffering mode after playing %d bytes", total_played);
+        }
+
         // 如果需要更多MP3数据，从缓冲区读取
         if (bytes_left < 4096) {  // 保持至少4KB数据用于解码
             AudioChunk chunk;
-            
+
             // 从缓冲区获取音频数据
             {
                 std::unique_lock<std::mutex> lock(buffer_mutex_);
@@ -732,8 +757,26 @@ void Esp32Music::PlayAudioStream() {
                         ESP_LOGI(TAG, "Playback finished, total played: %d bytes", total_played);
                         break;
                     }
+
+                    // 渐进式缓冲策略: 根据当前阶段使用不同的缓冲要求
+                    size_t required_buffer = is_initial_buffering_ ?
+                                            INITIAL_BUFFER_SIZE / 2 :  // 初始阶段: 4KB即可继续
+                                            STABLE_BUFFER_SIZE;         // 稳定阶段: 需要32KB缓冲
+
+                    // 缓冲不足时等待
+                    if (buffer_size_ < required_buffer) {
+                        ESP_LOGD(TAG, "Buffer underrun, waiting... (current: %d, required: %d, mode: %s)",
+                                buffer_size_, required_buffer,
+                                is_initial_buffering_ ? "initial" : "stable");
+                        buffer_cv_.wait(lock, [this, required_buffer] {
+                            return buffer_size_ >= required_buffer || !is_downloading_;
+                        });
+                    }
+
                     // 等待新数据
-                    buffer_cv_.wait(lock, [this] { return !audio_buffer_.empty() || !is_downloading_; });
+                    if (audio_buffer_.empty()) {
+                        buffer_cv_.wait(lock, [this] { return !audio_buffer_.empty() || !is_downloading_; });
+                    }
                     if (audio_buffer_.empty()) {
                         continue;
                     }

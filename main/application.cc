@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <esp_log.h>
+#include <esp_http_client.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -964,145 +965,62 @@ void Application::HandleMusicCommand(const cJSON* data) {
 }
 
 void Application::HandleMusicSetPlaylist(const cJSON* data) {
-    // 防抖逻辑：检查是否在短时间内重复调用
-    int64_t current_time = esp_timer_get_time();  // 获取当前时间（微秒）
-    int64_t time_diff_ms = (current_time - last_set_playlist_time_) / 1000;  // 转换为毫秒
-
-    if (last_set_playlist_time_ > 0 && time_diff_ms < kSetPlaylistDebounceMs) {
-        ESP_LOGW(TAG, "HandleMusicSetPlaylist called too frequently (%.0f ms), ignoring to prevent device crash",
-                 (double)time_diff_ms);
-        return;
-    }
     auto& board = Board::GetInstance();
     auto music = board.GetMusic();
-    is_switching_song_ = true;  // 设置切歌标志，防止状态切换到聆听
+
+    is_switching_song_ = true;
     music->StopSong();
     music_is_stopped_ = true;
     is_music_playing_ = false;
 
-    // 更新最后调用时间
-    last_set_playlist_time_ = current_time;
-
-    // 解析播放列表
+    // 解析精简指令
     auto playlist_id = cJSON_GetObjectItem(data, "playlist_id");
     auto resource_type = cJSON_GetObjectItem(data, "resource_type");
-    auto items = cJSON_GetObjectItem(data, "items");
     auto start_item_id = cJSON_GetObjectItem(data, "start_item_id");
     auto play_mode = cJSON_GetObjectItem(data, "play_mode");
     auto play_type = cJSON_GetObjectItem(data, "play_type");
+    auto start_item_url = cJSON_GetObjectItem(data, "start_item_url");
+    auto playlist_url = cJSON_GetObjectItem(data, "playlist_url");
 
     if (!cJSON_IsNumber(playlist_id) || !cJSON_IsNumber(resource_type) ||
-        !cJSON_IsArray(items) || !cJSON_IsNumber(start_item_id) ||
-        !cJSON_IsNumber(play_mode) || !cJSON_IsNumber(play_type)) {
+        !cJSON_IsNumber(start_item_id) || !cJSON_IsNumber(play_mode) ||
+        !cJSON_IsNumber(play_type) || !cJSON_IsString(start_item_url)) {
         ESP_LOGW(TAG, "Invalid set_playlist parameters");
         return;
     }
 
     int new_playlist_id = playlist_id->valueint;
-    int new_start_item_id = start_item_id->valueint;
-    bool is_same_playlist = (music_playlist_manager_->GetPlaylistId() == new_playlist_id);
+    current_playlist_id_ = new_playlist_id;
 
-    // 如果是同一个播放列表，仅切换歌曲
-    if (is_same_playlist) {
-        ESP_LOGI(TAG, "Same playlist_id=%d, switching to item_id=%d",
-                 new_playlist_id, new_start_item_id);
-
-        // 更新播放模式和类型（可能变化）
-        music_playlist_manager_->SetPlayMode(static_cast<PlayMode>(play_mode->valueint));
-        music_playlist_manager_->SetPlayType(static_cast<PlayType>(play_type->valueint));
-
-        // 切换到指定歌曲
-        if (music_playlist_manager_->SetCurrentByItemId(new_start_item_id)) {
-            if (music != nullptr) {
-                if (!music->IsPlaying() && !is_switching_song_) {
-                    AbortSpeaking(kAbortReasonNone);        
-                }
-                const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
-                if (current_item != nullptr) {
-                    ESP_LOGI(TAG, "Switching to: %s", current_item->resource_name.c_str());
-
-                    // 平滑切换：停止当前播放，开始新歌曲
-                    // music->StopStreaming();
-                    if (music->StartStreaming(current_item->url)) {
-                        music_is_stopped_ = false;
-                        is_music_playing_ = true;
-                        is_switching_song_ = false;  // 清除切歌标志
-                        music->SetAutomated(false);
-                        StartMusicStatusTimer();
-                        SendMusicStatus(true);
-                        ESP_LOGI(TAG, "Song switched, is_switching_song cleared");
-                    } else {
-                        ESP_LOGE(TAG, "Failed to start streaming");
-                        is_switching_song_ = false;  // 即使失败也要清除标志
-                    }
-                }
-            }
-        } else {
-            ESP_LOGW(TAG, "Failed to switch to item_id=%d", new_start_item_id);
-        }
-        return;
-    }
-
-    // 不同播放列表，完整设置流程
-    ESP_LOGI(TAG, "New playlist_id=%d, loading full playlist", new_playlist_id);
-
-    // 设置播放列表信息
+    // 设置播放列表基本信息
     music_playlist_manager_->SetPlaylistId(new_playlist_id);
     music_playlist_manager_->SetResourceType(resource_type->valueint);
     music_playlist_manager_->SetPlayMode(static_cast<PlayMode>(play_mode->valueint));
     music_playlist_manager_->SetPlayType(static_cast<PlayType>(play_type->valueint));
 
-    // 解析播放项
-    std::vector<MusicItem> playlist;
-    int array_size = cJSON_GetArraySize(items);
-    for (int i = 0; i < array_size; i++) {
-        cJSON* item = cJSON_GetArrayItem(items, i);
-        auto item_id = cJSON_GetObjectItem(item, "item_id");
-        auto url = cJSON_GetObjectItem(item, "url");
-        auto resource_id = cJSON_GetObjectItem(item, "resource_id");
-        auto resource_name = cJSON_GetObjectItem(item, "resource_name");
-        auto duration = cJSON_GetObjectItem(item, "duration");
+    ESP_LOGI(TAG, "Playlist set: id=%d, starting first song", new_playlist_id);
 
-        if (cJSON_IsNumber(item_id) && cJSON_IsString(url) &&
-            cJSON_IsString(resource_name) && cJSON_IsNumber(duration)) {
-            MusicItem music_item(
-                item_id->valueint,
-                url->valuestring,
-                resource_id->valueint,
-                resource_name->valuestring,
-                duration->valueint
-            );
-            playlist.push_back(music_item);
+    // 第一首歌立即播放
+    if (music != nullptr) {
+        AbortSpeaking(kAbortReasonNone);
+        if (music->StartStreaming(start_item_url->valuestring)) {
+            is_music_playing_ = true;
+            music_is_stopped_ = false;
+            is_switching_song_ = false;
+            music->SetAutomated(false);
+            StartMusicStatusTimer();
+            SendMusicStatus(true);
+            ESP_LOGI(TAG, "First song started");
+        } else {
+            ESP_LOGE(TAG, "Failed to start first song");
+            is_switching_song_ = false;
+            return;
         }
     }
 
-    music_playlist_manager_->SetPlaylist(playlist);
-    music_playlist_manager_->SetCurrentByItemId(new_start_item_id);
-
-    ESP_LOGI(TAG, "Playlist set: id=%d, type=%d, mode=%d, play_type=%d, items=%d, start=%d",
-             new_playlist_id, resource_type->valueint,
-             play_mode->valueint, play_type->valueint,
-             playlist.size(), new_start_item_id);
-
-    // 自动开始播放第一首
-    if (music != nullptr) {
-        AbortSpeaking(kAbortReasonNone);
-        const MusicItem* current_item = music_playlist_manager_->GetCurrentItem();
-        if (current_item != nullptr) {
-            ESP_LOGI(TAG, "Starting playback: %s", current_item->resource_name.c_str());
-            if (music->StartStreaming(current_item->url)) {
-                is_music_playing_ = true;
-                music_is_stopped_ = false;  // 新播放列表开始播放，清除停止标记
-                is_switching_song_ = false;  // 清除切歌标志
-                music->SetAutomated(false);
-                StartMusicStatusTimer();
-                SendMusicStatus(true);  // 立即发送开始播放状态
-                ESP_LOGI(TAG, "New playlist started, is_switching_song cleared");
-            } else {
-                ESP_LOGE(TAG, "Failed to start streaming");
-                is_switching_song_ = false;  // 即使失败也要清除标志
-            }
-        }
+    // 异步拉取完整歌单
+    if (cJSON_IsString(playlist_url)) {
+        FetchPlaylistAsync(playlist_url->valuestring, new_playlist_id);
     }
 }
 
@@ -1439,4 +1357,133 @@ void Application::OnChargingStatusChanged(bool is_charging) {
     Schedule([this]() {
         SendDeviceStatus();
     });
+}
+
+// HTTPS异步拉取歌单
+void Application::FetchPlaylistAsync(const std::string& url, int playlist_id) {
+    if (playlist_fetch_task_ != nullptr) {
+        vTaskDelete(playlist_fetch_task_);
+        playlist_fetch_task_ = nullptr;
+    }
+
+    auto params = new FetchParams{this, url, playlist_id};
+    xTaskCreate(PlaylistFetchTask, "playlist_fetch", 8192, params, 2, &playlist_fetch_task_);
+}
+
+void Application::PlaylistFetchTask(void* arg) {
+    auto params = static_cast<FetchParams*>(arg);
+    Application* app = params->app;
+    std::string url = params->url;
+    int playlist_id = params->playlist_id;
+    delete params;
+
+    ESP_LOGI(TAG, "Fetching playlist: %s (id=%d)", url.c_str(), playlist_id);
+
+    // 校验playlist_id
+    if (app->current_playlist_id_ != playlist_id) {
+        ESP_LOGW(TAG, "Playlist ID changed, abort");
+        app->playlist_fetch_task_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    // HTTPS拉取
+    esp_http_client_config_t config = {};
+    config.url = url.c_str();
+    config.timeout_ms = 10000;
+    config.skip_cert_common_name_check = true;
+    config.transport_type = HTTP_TRANSPORT_OVER_SSL;
+    config.crt_bundle_attach = nullptr;
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP open failed: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        app->playlist_fetch_task_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    int content_length = esp_http_client_fetch_headers(client);
+    if (content_length <= 0) {
+        ESP_LOGE(TAG, "Invalid content length: %d", content_length);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        app->playlist_fetch_task_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    std::string response_data;
+    response_data.reserve(content_length);
+
+    char buffer[1024];
+    int read_len;
+    while ((read_len = esp_http_client_read(client, buffer, sizeof(buffer))) > 0) {
+        response_data.append(buffer, read_len);
+    }
+
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+
+    // 再次校验playlist_id
+    if (app->current_playlist_id_ != playlist_id) {
+        ESP_LOGW(TAG, "Playlist ID changed after fetch, discard");
+        app->playlist_fetch_task_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    // 解析JSON
+    cJSON* root = cJSON_Parse(response_data.c_str());
+    if (root == nullptr) {
+        ESP_LOGE(TAG, "JSON parse failed");
+        app->playlist_fetch_task_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    auto items = cJSON_GetObjectItem(root, "items");
+    if (!cJSON_IsArray(items)) {
+        ESP_LOGE(TAG, "Invalid JSON: missing items array");
+        cJSON_Delete(root);
+        app->playlist_fetch_task_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    std::vector<MusicItem> playlist;
+    int array_size = cJSON_GetArraySize(items);
+    for (int i = 0; i < array_size; i++) {
+        cJSON* item = cJSON_GetArrayItem(items, i);
+        auto item_id = cJSON_GetObjectItem(item, "item_id");
+        auto url_obj = cJSON_GetObjectItem(item, "url");
+        auto resource_id = cJSON_GetObjectItem(item, "resource_id");
+        auto resource_name = cJSON_GetObjectItem(item, "resource_name");
+        auto duration = cJSON_GetObjectItem(item, "duration");
+
+        if (cJSON_IsNumber(item_id) && cJSON_IsString(url_obj) &&
+            cJSON_IsString(resource_name) && cJSON_IsNumber(duration)) {
+            playlist.emplace_back(
+                item_id->valueint,
+                url_obj->valuestring,
+                resource_id->valueint,
+                resource_name->valuestring,
+                duration->valueint
+            );
+        }
+    }
+
+    cJSON_Delete(root);
+
+    // 更新歌单
+    app->Schedule([app, playlist = std::move(playlist)]() {
+        app->music_playlist_manager_->SetPlaylist(playlist);
+        ESP_LOGI(TAG, "Playlist updated with %d items", playlist.size());
+    });
+
+    app->playlist_fetch_task_ = nullptr;
+    vTaskDelete(nullptr);
 }
