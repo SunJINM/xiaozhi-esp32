@@ -985,7 +985,6 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
     }
 
     int new_playlist_id = playlist_id->valueint;
-    current_playlist_id_ = new_playlist_id;
 
     // 设置播放列表基本信息
     music_playlist_manager_->SetPlaylistId(new_playlist_id);
@@ -997,18 +996,19 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
 
     // 直接切换播放(不停止)
     if (music != nullptr) {
-        AbortSpeaking(kAbortReasonNone);
+        if (!is_music_playing_) {
+            AbortSpeaking(kAbortReasonNone);
+        }
+        is_switching_song_ = true;
         if (music->StartStreaming(start_item_url->valuestring)) {
             is_music_playing_ = true;
             music_is_stopped_ = false;
-            is_switching_song_ = false;
             music->SetAutomated(false);
             StartMusicStatusTimer();
             SendMusicStatus(true);
             ESP_LOGI(TAG, "First song started");
         } else {
             ESP_LOGE(TAG, "Failed to start first song");
-            is_switching_song_ = false;
         }
     }
 
@@ -1177,12 +1177,14 @@ void Application::OnMusicSongFinished() {
         auto& board = Board::GetInstance();
         auto music = board.GetMusic();
         if (music != nullptr) {
+            is_music_playing_ = true;
             music->SetAutomated(true);
             if (music->StartStreaming(next_item->url)) {
                 music_is_stopped_ = false;  // 自动播放下一曲，清除停止标记
                 SendMusicStatus(true);  // 发送新歌曲开始状态
             } else {
                 ESP_LOGE(TAG, "Failed to start next item");
+                is_music_playing_ = false;
                 music_is_stopped_ = true;  // 播放失败，设置停止标记
                 StopMusicStatusTimer();
                 SendMusicStatus(true);
@@ -1190,6 +1192,7 @@ void Application::OnMusicSongFinished() {
         }
     } else {
         ESP_LOGI(TAG, "No more items, playlist finished");
+        is_music_playing_ = false;
         music_is_stopped_ = true;  // 播放列表结束，设置停止标记
         StopMusicStatusTimer();
         SendMusicStatus(true);  // 发送播放结束状态
@@ -1380,6 +1383,7 @@ void Application::PlaylistFetchTask(void* arg) {
         vTaskDelete(nullptr);
         return;
     }
+    app->current_playlist_id_ = playlist_id;
 
     // HTTPS拉取
     esp_http_client_config_t config = {};
