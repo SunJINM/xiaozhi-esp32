@@ -103,29 +103,6 @@ static void add_auth_headers(Http* http) {
     }
 }
 
-// URL编码函数
-static std::string url_encode(const std::string& str) {
-    std::string encoded;
-    char hex[4];
-    
-    for (size_t i = 0; i < str.length(); i++) {
-        unsigned char c = str[i];
-        
-        if ((c >= 'A' && c <= 'Z') ||
-            (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') ||
-            c == '-' || c == '_' || c == '.' || c == '~') {
-            encoded += c;
-        } else if (c == ' ') {
-            encoded += '+';  // 空格编码为'+'或'%20'
-        } else {
-            snprintf(hex, sizeof(hex), "%%%02X", c);
-            encoded += hex;
-        }
-    }
-    return encoded;
-}
-
 Esp32Music::Esp32Music() : last_downloaded_data_(), current_music_url_(), current_song_name_(),
                          song_name_displayed_(false),
                          display_mode_(DISPLAY_MODE_LYRICS), is_playing_(false), is_downloading_(false),

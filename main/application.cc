@@ -409,7 +409,6 @@ void Application::Start() {
     // Add MCP common tools before initializing the protocol
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
-    mcp_server.AddUserOnlyTools();
 
     if (ota.HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
