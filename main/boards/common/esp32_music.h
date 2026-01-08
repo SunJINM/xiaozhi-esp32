@@ -94,7 +94,6 @@ public:
     // 新增方法
     virtual bool StartStreaming(const std::string& music_url) override;
     virtual bool StopStreaming() override;  // 停止流式播放
-    bool StartStreamingFromPosition(const std::string& music_url, int64_t position_ms);  // 从指定位置开始播放
     bool StartStreamingFromByteOffset(const std::string& music_url, size_t byte_offset);  // 从字节偏移开始播放
     virtual size_t GetBufferSize() const override { return buffer_size_; }
     virtual bool IsDownloading() const override { return is_downloading_; }

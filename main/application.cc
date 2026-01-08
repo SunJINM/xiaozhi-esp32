@@ -1066,9 +1066,9 @@ void Application::HandleMusicControl(const std::string& action) {
                      current_item->item_id, (long long)position_ms, byte_offset, sample_rate, channels);
         }
     } else if (action == "resume") {
-        is_music_playing_ = true;
         // 从断点恢复播放
         if (music_playlist_manager_->HasCheckpoint()) {
+            is_music_playing_ = true;
             AbortSpeaking(kAbortReasonNone);
             music_is_stopped_ = false;
             const auto& checkpoint = music_playlist_manager_->GetCheckpoint();
@@ -1080,17 +1080,10 @@ void Application::HandleMusicControl(const std::string& action) {
             SendMusicStatus(true);
             StartMusicStatusTimer();
 
-            // 方案B：如果有字节偏移信息，使用 HTTP Range 请求（快速恢复）
             if (checkpoint.byte_offset > 0 && checkpoint.sample_rate > 0 && checkpoint.channels > 0) {
                 ESP_LOGI(TAG, "Using Method B: HTTP Range from byte %zu (rate=%d, ch=%d)",
                          checkpoint.byte_offset, checkpoint.sample_rate, checkpoint.channels);
                 resume_success = music->StartStreamingFromByteOffset(checkpoint.url, checkpoint.byte_offset);
-            }
-
-            // 方案A：降级策略，如果方案B失败或没有字节偏移信息，使用解码丢弃法
-            if (!resume_success) {
-                ESP_LOGW(TAG, "Method B failed or unavailable, fallback to Method A: decode-skip");
-                resume_success = music->StartStreamingFromPosition(checkpoint.url, checkpoint.position_ms);
             }
 
             if (resume_success) {
@@ -1100,12 +1093,6 @@ void Application::HandleMusicControl(const std::string& action) {
             } else {
                 ESP_LOGE(TAG, "Failed to resume from checkpoint");
             }
-        } else {
-            // 没有断点信息，尝试普通恢复（兼容旧逻辑）
-            ESP_LOGW(TAG, "No checkpoint available, trying normal resume");
-            music->ResumeSong();
-            StartMusicStatusTimer();
-            SendMusicStatus(true);
         }
     } else if (action == "stop") {
         is_music_playing_ = false;
@@ -1122,7 +1109,6 @@ void Application::HandleMusicControl(const std::string& action) {
         if (next_item != nullptr) {
             ESP_LOGI(TAG, "Manual next: %s (item_id=%d)",
                      next_item->resource_name.c_str(), next_item->item_id);
-            music->StopStreaming();
             if (music->StartStreaming(next_item->url)) {
                 music_is_stopped_ = false;  // 切歌后清除停止标记
                 SendMusicStatus(true);
@@ -1137,7 +1123,6 @@ void Application::HandleMusicControl(const std::string& action) {
         if (prev_item != nullptr) {
             ESP_LOGI(TAG, "Manual previous: %s (item_id=%d)",
                      prev_item->resource_name.c_str(), prev_item->item_id);
-            music->StopStreaming();
             if (music->StartStreaming(prev_item->url)) {
                 music_is_stopped_ = false;  // 切歌后清除停止标记
                 SendMusicStatus(true);

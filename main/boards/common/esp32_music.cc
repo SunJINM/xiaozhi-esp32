@@ -325,20 +325,12 @@ bool Esp32Music::StopStreaming() {
     if (original_volume > 0) {
         ESP_LOGI(TAG, "Muting audio (volume: %d -> 0) to prevent pop noise", original_volume);
         codec->SetOutputVolume(0);
-        vTaskDelay(pdMS_TO_TICKS(50));  // 等待静音生效
     }
 
     // 停止下载和播放标志
     is_downloading_ = false;
     is_playing_ = false;
     is_paused_ = false;  // 重置暂停状态
-
-    // 清空歌名显示
-    auto display = board.GetDisplay();
-    if (display) {
-        display->SetMusicInfo("");  // 清空歌名显示
-        ESP_LOGI(TAG, "Cleared song name display");
-    }
     
     // 通知所有等待的线程
     {
@@ -400,30 +392,7 @@ bool Esp32Music::StopStreaming() {
     return true;
 }
 
-// 从指定位置开始流式播放（方案A：解码丢弃法）
-bool Esp32Music::StartStreamingFromPosition(const std::string& music_url, int64_t position_ms) {
-    if (music_url.empty()) {
-        ESP_LOGE(TAG, "Music URL is empty");
-        return false;
-    }
-
-    ESP_LOGI(TAG, "Starting streaming from position: %lld ms (Method A: decode-skip)",
-             (long long)position_ms);
-
-    // 设置跳转目标位置
-    skip_to_position_ms_ = position_ms;
-
-    // 调用普通的StartStreaming，播放线程会处理跳转
-    bool result = StartStreaming(music_url);
-
-    if (!result) {
-        skip_to_position_ms_ = 0;  // 启动失败，重置跳转标志
-    }
-
-    return result;
-}
-
-// 从字节偏移开始流式播放（方案B：HTTP Range请求）
+// 从字节偏移开始流式播放
 bool Esp32Music::StartStreamingFromByteOffset(const std::string& music_url, size_t byte_offset) {
     if (music_url.empty()) {
         ESP_LOGE(TAG, "Music URL is empty");
@@ -550,20 +519,6 @@ void Esp32Music::DownloadAudioStream(const std::string& music_url, size_t start_
 
         // 累加已下载字节数（用于断点续传）
         downloaded_bytes_ += bytes_read;
-        
-        // 打印数据块信息
-        // ESP_LOGI(TAG, "Downloaded chunk: %d bytes at offset %d", bytes_read, total_downloaded);
-        
-        // 安全地打印数据块的十六进制内容（前16字节）
-        if (bytes_read >= 16) {
-            // ESP_LOGI(TAG, "Data: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X ...", 
-            //         (unsigned char)buffer[0], (unsigned char)buffer[1], (unsigned char)buffer[2], (unsigned char)buffer[3],
-            //         (unsigned char)buffer[4], (unsigned char)buffer[5], (unsigned char)buffer[6], (unsigned char)buffer[7],
-            //         (unsigned char)buffer[8], (unsigned char)buffer[9], (unsigned char)buffer[10], (unsigned char)buffer[11],
-            //         (unsigned char)buffer[12], (unsigned char)buffer[13], (unsigned char)buffer[14], (unsigned char)buffer[15]);
-        } else {
-            ESP_LOGI(TAG, "Data chunk too small: %d bytes", bytes_read);
-        }
         
         // 尝试检测文件格式（检查文件头）
         if (total_downloaded == 0 && bytes_read >= 4) {
@@ -711,7 +666,7 @@ void Esp32Music::PlayAudioStream() {
             app.Schedule([this, &app]() {
                 app.SetDeviceState(kDeviceStateSpeaking);
             });
-            vTaskDelay(pdMS_TO_TICKS(20));  // 优化: 50ms → 20ms 减少状态切换延迟
+            vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
         
