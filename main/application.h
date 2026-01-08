@@ -11,6 +11,7 @@
 #include <deque>
 #include <memory>
 
+#include "esp_tls.h"
 #include "protocol.h"
 #include "ota.h"
 #include "audio_service.h"

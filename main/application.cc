@@ -968,11 +968,6 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
     auto& board = Board::GetInstance();
     auto music = board.GetMusic();
 
-    is_switching_song_ = true;
-    music->StopSong();
-    music_is_stopped_ = true;
-    is_music_playing_ = false;
-
     // 解析精简指令
     auto playlist_id = cJSON_GetObjectItem(data, "playlist_id");
     auto resource_type = cJSON_GetObjectItem(data, "resource_type");
@@ -1000,7 +995,7 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
 
     ESP_LOGI(TAG, "Playlist set: id=%d, starting first song", new_playlist_id);
 
-    // 第一首歌立即播放
+    // 直接切换播放(不停止)
     if (music != nullptr) {
         AbortSpeaking(kAbortReasonNone);
         if (music->StartStreaming(start_item_url->valuestring)) {
@@ -1014,7 +1009,6 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
         } else {
             ESP_LOGE(TAG, "Failed to start first song");
             is_switching_song_ = false;
-            return;
         }
     }
 
@@ -1407,8 +1401,12 @@ void Application::PlaylistFetchTask(void* arg) {
     }
 
     int content_length = esp_http_client_fetch_headers(client);
-    if (content_length <= 0) {
-        ESP_LOGE(TAG, "Invalid content length: %d", content_length);
+    int status_code = esp_http_client_get_status_code(client);
+
+    ESP_LOGI(TAG, "HTTP Status: %d, Content-Length: %d", status_code, content_length);
+
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "HTTP request failed with status code: %d", status_code);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         app->playlist_fetch_task_ = nullptr;
@@ -1416,8 +1414,14 @@ void Application::PlaylistFetchTask(void* arg) {
         return;
     }
 
+    if (content_length <= 0) {
+        ESP_LOGI(TAG, "Content-Length not available or zero, will read until connection closes");
+    }
+
     std::string response_data;
-    response_data.reserve(content_length);
+    if (content_length > 0) {
+        response_data.reserve(content_length);
+    }
 
     char buffer[1024];
     int read_len;
@@ -1428,6 +1432,13 @@ void Application::PlaylistFetchTask(void* arg) {
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
 
+    // 打印前500个字符，避免日志过长
+    if (response_data.size() > 500) {
+        ESP_LOGI(TAG, "Response content (first 500 chars): %.500s...", response_data.c_str());
+    } else {
+        ESP_LOGI(TAG, "Response content: %s", response_data.c_str());
+    }
+
     // 再次校验playlist_id
     if (app->current_playlist_id_ != playlist_id) {
         ESP_LOGW(TAG, "Playlist ID changed after fetch, discard");
@@ -1436,7 +1447,7 @@ void Application::PlaylistFetchTask(void* arg) {
         return;
     }
 
-    // 解析JSON
+    // 解析JSON（服务器直接返回数组）
     cJSON* root = cJSON_Parse(response_data.c_str());
     if (root == nullptr) {
         ESP_LOGE(TAG, "JSON parse failed");
@@ -1445,9 +1456,9 @@ void Application::PlaylistFetchTask(void* arg) {
         return;
     }
 
-    auto items = cJSON_GetObjectItem(root, "items");
-    if (!cJSON_IsArray(items)) {
-        ESP_LOGE(TAG, "Invalid JSON: missing items array");
+    // 检查root是否是数组
+    if (!cJSON_IsArray(root)) {
+        ESP_LOGE(TAG, "Invalid JSON: expected array");
         cJSON_Delete(root);
         app->playlist_fetch_task_ = nullptr;
         vTaskDelete(nullptr);
@@ -1455,13 +1466,16 @@ void Application::PlaylistFetchTask(void* arg) {
     }
 
     std::vector<MusicItem> playlist;
-    int array_size = cJSON_GetArraySize(items);
+    int array_size = cJSON_GetArraySize(root);
+    ESP_LOGI(TAG, "Parsing %d items from playlist", array_size);
+
     for (int i = 0; i < array_size; i++) {
-        cJSON* item = cJSON_GetArrayItem(items, i);
-        auto item_id = cJSON_GetObjectItem(item, "item_id");
+        cJSON* item = cJSON_GetArrayItem(root, i);
+        // 使用驼峰命名的字段（itemId, resourceId, resourceName）
+        auto item_id = cJSON_GetObjectItem(item, "itemId");
         auto url_obj = cJSON_GetObjectItem(item, "url");
-        auto resource_id = cJSON_GetObjectItem(item, "resource_id");
-        auto resource_name = cJSON_GetObjectItem(item, "resource_name");
+        auto resource_id = cJSON_GetObjectItem(item, "resourceId");
+        auto resource_name = cJSON_GetObjectItem(item, "resourceName");
         auto duration = cJSON_GetObjectItem(item, "duration");
 
         if (cJSON_IsNumber(item_id) && cJSON_IsString(url_obj) &&
@@ -1469,7 +1483,7 @@ void Application::PlaylistFetchTask(void* arg) {
             playlist.emplace_back(
                 item_id->valueint,
                 url_obj->valuestring,
-                resource_id->valueint,
+                resource_id ? resource_id->valueint : 0,
                 resource_name->valuestring,
                 duration->valueint
             );
