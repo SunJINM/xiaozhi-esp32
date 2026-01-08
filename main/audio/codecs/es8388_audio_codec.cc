@@ -170,24 +170,49 @@ void Es8388AudioCodec::EnableOutput(bool enable) {
             .sample_rate = (uint32_t)output_sample_rate_,
             .mclk_multiple = 0,
         };
-        ESP_ERROR_CHECK(esp_codec_dev_open(output_dev_, &fs));
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, output_volume_));
 
-        // Set analog output volume to 0dB, default is -45dB
-        uint8_t reg_val = 30; // 0dB
+        // 先打开codec(静音状态)
+        ESP_ERROR_CHECK(esp_codec_dev_open(output_dev_, &fs));
+
+        // 硬件静音,防止开启瞬间爆音
+        uint8_t mute_val = 0; // 静音
         uint8_t regs[] = { 46, 47, 48, 49 }; // HP_LVOL, HP_RVOL, SPK_LVOL, SPK_RVOL
         for (uint8_t reg : regs) {
-            ctrl_if_->write_reg(ctrl_if_, reg, 1, &reg_val, 1);
+            ctrl_if_->write_reg(ctrl_if_, reg, 1, &mute_val, 1);
         }
 
+        // 延迟后开启PA
         if (pa_pin_ != GPIO_NUM_NC) {
+            vTaskDelay(pdMS_TO_TICKS(50)); // 等待codec稳定
             gpio_set_level(pa_pin_, 1);
+            vTaskDelay(pdMS_TO_TICKS(30)); // 等待PA稳定
         }
+
+        // 恢复模拟音量到0dB
+        uint8_t vol_val = 30; // 0dB
+        for (uint8_t reg : regs) {
+            ctrl_if_->write_reg(ctrl_if_, reg, 1, &vol_val, 1);
+        }
+
+        // 最后设置数字音量
+        ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, output_volume_));
+
     } else {
-        ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
+        // 关闭时先静音
         if (pa_pin_ != GPIO_NUM_NC) {
+            // 硬件静音
+            uint8_t mute_val = 0;
+            uint8_t regs[] = { 46, 47, 48, 49 };
+            for (uint8_t reg : regs) {
+                ctrl_if_->write_reg(ctrl_if_, reg, 1, &mute_val, 1);
+            }
+            vTaskDelay(pdMS_TO_TICKS(30)); // 等待静音完成
+
+            // 关闭PA
             gpio_set_level(pa_pin_, 0);
+            vTaskDelay(pdMS_TO_TICKS(20));
         }
+        ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
     }
     AudioCodec::EnableOutput(enable);
 }

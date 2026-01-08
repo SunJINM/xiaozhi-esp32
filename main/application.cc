@@ -993,20 +993,56 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
 
     ESP_LOGI(TAG, "Playlist set: id=%d, starting first song", new_playlist_id);
 
-    // 直接切换播放(不停止)
+    // 平滑切换播放(防止杂音)
     if (music != nullptr) {
         if (!is_music_playing_) {
             AbortSpeaking(kAbortReasonNone);
         }
+
         is_switching_song_ = true;
+
+        // 淡出当前音乐
+        auto codec = board.GetAudioCodec();
+        int original_volume = 0;
+        if (codec && is_music_playing_) {
+            original_volume = codec->output_volume();
+            if (original_volume > 0) {
+                // 快速淡出(约80ms)
+                for (int vol = original_volume; vol >= 0; vol -= 10) {
+                    codec->SetOutputVolume(vol);
+                    vTaskDelay(pdMS_TO_TICKS(16));
+                }
+            }
+            // 清空音频缓冲
+            codec->Flush();
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+
+        // 启动新歌
         if (music->StartStreaming(start_item_url->valuestring)) {
             is_music_playing_ = true;
             music_is_stopped_ = false;
             music->SetAutomated(false);
             StartMusicStatusTimer();
             SendMusicStatus(true);
-            ESP_LOGI(TAG, "First song started");
+
+            // 等待新歌缓冲建立后淡入
+            vTaskDelay(pdMS_TO_TICKS(100));
+            if (codec && original_volume > 0) {
+                // 渐进淡入
+                for (int vol = 0; vol <= original_volume; vol += 10) {
+                    codec->SetOutputVolume(vol);
+                    vTaskDelay(pdMS_TO_TICKS(16));
+                }
+                codec->SetOutputVolume(original_volume);
+            }
+
+            ESP_LOGI(TAG, "First song started with smooth transition");
         } else {
+            // 启动失败,恢复音量
+            if (codec && original_volume > 0) {
+                codec->SetOutputVolume(original_volume);
+            }
             ESP_LOGE(TAG, "Failed to start first song");
         }
     }
@@ -1342,6 +1378,12 @@ void Application::OnChargingStatusChanged(bool is_charging) {
 
 // HTTPS异步拉取歌单
 void Application::FetchPlaylistAsync(const std::string& url, int playlist_id) {
+    // 如果playlist_id与当前正在播放的相同,跳过重复拉取
+    if (current_playlist_id_ == playlist_id) {
+        ESP_LOGI(TAG, "Playlist id=%d already loaded, skip fetching", playlist_id);
+        return;
+    }
+
     if (playlist_fetch_task_ != nullptr) {
         vTaskDelete(playlist_fetch_task_);
         playlist_fetch_task_ = nullptr;
@@ -1359,15 +1401,6 @@ void Application::PlaylistFetchTask(void* arg) {
     delete params;
 
     ESP_LOGI(TAG, "Fetching playlist: %s (id=%d)", url.c_str(), playlist_id);
-
-    // 校验playlist_id
-    if (app->current_playlist_id_ != playlist_id) {
-        ESP_LOGW(TAG, "Playlist ID changed, abort");
-        app->playlist_fetch_task_ = nullptr;
-        vTaskDelete(nullptr);
-        return;
-    }
-    app->current_playlist_id_ = playlist_id;
 
     // HTTPS拉取
     esp_http_client_config_t config = {};
@@ -1427,14 +1460,6 @@ void Application::PlaylistFetchTask(void* arg) {
         ESP_LOGI(TAG, "Response content: %s", response_data.c_str());
     }
 
-    // 再次校验playlist_id
-    if (app->current_playlist_id_ != playlist_id) {
-        ESP_LOGW(TAG, "Playlist ID changed after fetch, discard");
-        app->playlist_fetch_task_ = nullptr;
-        vTaskDelete(nullptr);
-        return;
-    }
-
     // 解析JSON（服务器直接返回数组）
     cJSON* root = cJSON_Parse(response_data.c_str());
     if (root == nullptr) {
@@ -1480,10 +1505,11 @@ void Application::PlaylistFetchTask(void* arg) {
 
     cJSON_Delete(root);
 
-    // 更新歌单
-    app->Schedule([app, playlist = std::move(playlist)]() {
+    // 更新歌单并标记当前playlist_id
+    app->Schedule([app, playlist = std::move(playlist), playlist_id]() {
         app->music_playlist_manager_->SetPlaylist(playlist);
-        ESP_LOGI(TAG, "Playlist updated with %d items", playlist.size());
+        app->current_playlist_id_ = playlist_id; // 拉取成功后才更新ID
+        ESP_LOGI(TAG, "Playlist updated with %d items (id=%d)", playlist.size(), playlist_id);
     });
 
     app->playlist_fetch_task_ = nullptr;
