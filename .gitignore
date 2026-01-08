@@ -19,3 +19,6 @@ mmap_generate_*.h
 CLAUDE.md
 .claude
 nul
+.claude
+.github
+claudedocs
