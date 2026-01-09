@@ -75,7 +75,20 @@ void AudioCodec::EnableOutput(bool enable) {
 
 void AudioCodec::Flush() {
     if (tx_handle_ != nullptr) {
-        i2s_channel_preload_data(tx_handle_, nullptr, 0, nullptr);
-        ESP_LOGI(TAG, "Flushed audio output buffer");
+        // 播放中的通道不能用preload_data,改用静音数据快速清空
+        const size_t silence_samples = 480; // 10ms @ 48kHz
+        int16_t silence_buffer[silence_samples] = {0};
+        size_t bytes_written = 0;
+
+        // 写入3次静音数据(约30ms),快速覆盖DMA缓冲区
+        for (int i = 0; i < 3; i++) {
+            esp_err_t ret = i2s_channel_write(tx_handle_, silence_buffer,
+                                              sizeof(silence_buffer), &bytes_written, 10);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Flush: failed to write silence data (attempt %d)", i + 1);
+                break;
+            }
+        }
+        ESP_LOGI(TAG, "Flushed audio output buffer with silence");
     }
 }

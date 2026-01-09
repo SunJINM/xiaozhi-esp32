@@ -1013,9 +1013,8 @@ void Application::HandleMusicSetPlaylist(const cJSON* data) {
                     vTaskDelay(pdMS_TO_TICKS(16));
                 }
             }
-            // 清空音频缓冲
-            codec->Flush();
-            vTaskDelay(pdMS_TO_TICKS(50));
+            // 淡出后等待音频播放完毕(StartStreaming会清空缓冲)
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
 
         // 启动新歌

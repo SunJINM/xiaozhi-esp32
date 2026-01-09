@@ -236,28 +236,29 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         }
     }
     
-    // 停止之前的播放和下载
+    // 停止播放和下载标志
     is_downloading_ = false;
     is_playing_ = false;
-    
-    // 等待之前的线程完全结束
+
+    // 立即清空软件缓冲区(在停止标志后,线程会检测到并退出)
+    ClearAudioBuffer();
+
+    // 通知并等待线程退出
+    {
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        buffer_cv_.notify_all();
+    }
+
     if (download_thread_.joinable()) {
-        {
-            std::lock_guard<std::mutex> lock(buffer_mutex_);
-            buffer_cv_.notify_all();  // 通知线程退出
-        }
         download_thread_.join();
     }
     if (play_thread_.joinable()) {
-        {
-            std::lock_guard<std::mutex> lock(buffer_mutex_);
-            buffer_cv_.notify_all();  // 通知线程退出
-        }
         play_thread_.join();
     }
-    
-    // 清空缓冲区
-    ClearAudioBuffer();
+
+    // 等待DMA硬件缓冲区播放完毕(避免残留音频导致杂音)
+    // DMA通常有6个描述符 * 240帧 = 1440帧 ≈ 30ms @ 48kHz
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // 重置已下载字节数
     downloaded_bytes_ = 0;
